@@ -373,10 +373,13 @@ class RendererTest < NativeTest
     Citrine.dev_mode = true
     _out, err = capture_io { mount(Noisy) }
 
-    assert_match(/样式键 :color 在原生后端不支持/, err)
-    assert_match(/样式键 :width 在原生后端不支持/, err)
+    # 提醒按 StyleMatrix 分档：:color 是"只能自绘"，:width 是"没有对应概念"
+    assert_match(/样式键 :color 在原生后端不支持自动映射（需要自绘）/, err)
+    assert_match(/painter\.text/, err)
+    assert_match(/样式键 :width 在原生后端没有对应概念/, err)
     assert_match(/属性 "id"/, err)
     assert_match(/已忽略/, err)
+    assert_match(/docs\/design\/style-matrix\.md/, err, "提醒要指向样式能力矩阵")
   end
 
   def test_unsupported_style_is_silent_outside_dev_mode
@@ -598,5 +601,174 @@ class RendererTest < NativeTest
 
     assert_equal 1, find(kind: :entry).callback_count(:change)
     assert_equal 1, find(kind: :checkbox).callback_count(:toggle)
+  end
+
+  # ── N3（续）：错误边界的三个变体、样式键归一、符号处理器、Signal 透传提醒 ──
+
+  # 无兜底的重跑错误照常抛给调用方（错误边界只兜它自己覆盖的子树）
+  class BareBomb < Citrine::Component
+    class << self
+      attr_accessor :instance
+    end
+
+    state :armed, default: false
+
+    def initialize(props = {})
+      super
+      self.class.instance = self
+    end
+
+    def view
+      raise "无兜底爆炸" if armed
+
+      label { "ok" }
+    end
+  end
+
+  class BareBombHost < Citrine::Component
+    def view
+      stack { render(BareBomb, key: :b) }
+    end
+  end
+
+  def test_rerun_error_without_fallback_propagates
+    mount(BareBombHost)
+    child = BareBomb.instance
+
+    error = assert_raises(RuntimeError) { child.armed = true }
+
+    assert_match(/无兜底爆炸/, error.message)
+  end
+
+  # 多根组件（fragment 语义）重跑失败 → 自己的兜底就地替换掉全部根
+  class MultiRootBomb < Citrine::Component
+    class << self
+      attr_accessor :instance
+    end
+
+    state :armed, default: false
+
+    error_fallback { |_error| label { "多根兜底" } }
+
+    def initialize(props = {})
+      super
+      self.class.instance = self
+    end
+
+    def view
+      raise "多根爆炸" if armed
+
+      label { "甲" }
+      label { "乙" }
+    end
+  end
+
+  class MultiRootHost < Citrine::Component
+    def view
+      stack { render(MultiRootBomb, key: :m) }
+    end
+  end
+
+  def test_multi_root_rerun_error_renders_fallback_in_place
+    mount(MultiRootHost)
+
+    assert_equal %w[甲 乙], texts(kind: :label)
+
+    MultiRootBomb.instance.armed = true
+
+    assert_equal ["多根兜底"], texts(kind: :label), "兜底要替换掉全部根，且不残留旧内容"
+  end
+
+  # 首次渲染就抛错：子组件自己的兜底接住，不需要父级边界
+  class FirstRenderBomb < Citrine::Component
+    error_fallback { |error| label { "首次兜底：#{error.message}" } }
+
+    def view
+      raise "首次爆炸"
+    end
+  end
+
+  def test_first_render_error_uses_childs_own_fallback
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack do
+          label { "head" }
+          render(FirstRenderBomb)
+        end
+      end
+    end
+
+    mount(klass)
+
+    assert_equal ["head", "首次兜底：首次爆炸"], texts(kind: :label)
+  end
+
+  # 样式键归一：kebab-case 与 camelCase 都要落到同一套语义（主仓 style_test 的口径）
+  def test_kebab_case_style_keys_are_normalized
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack(style: { "gap" => 6 }) do
+          label(style: { "flex-grow" => 1 }) { "x" }
+        end
+      end
+    end
+    mount(klass)
+
+    assert container.children.first.padded, "kebab-case 的 gap 要映射到容器 padding"
+    assert_equal true, find(kind: :label).instance_variable_get(:@stretchy),
+                 "kebab-case 的 flex-grow 要等价于 flex_grow"
+  end
+
+  # 事件处理器写成符号方法名：按 arity 派发（主仓 dispatch_callable 的口径）
+  class SymbolHandler < Citrine::Component
+    attr_reader :hits
+
+    def initialize(props = {})
+      super
+      @hits = []
+    end
+
+    def view
+      button(on_click: :bump) { "go" }
+    end
+
+    def bump = @hits << :zero_arity
+  end
+
+  def test_symbol_handler_dispatches_to_component_method
+    component = mount(SymbolHandler)
+
+    click(find(kind: :button))
+
+    assert_equal [:zero_arity], component.hits
+  end
+
+  # 透传属性收到 Signal 要提醒（值不会解包、会渲染成 #<Citrine::Signal…>）；
+  # 受控值属性（value:）传 Signal 是正常用法，不该提醒
+  def test_passthrough_prop_with_signal_warns
+    Citrine.dev_mode = true
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack { label(title: Citrine::Signal.new("x")) { "hi" } }
+      end
+    end
+
+    _out, err = capture_io { mount(klass) }
+
+    assert_match(/收到 Signal/, err)
+    assert_match(/受控值/, err)
+  end
+
+  def test_controlled_value_signal_does_not_warn
+    Citrine.dev_mode = true
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack { text_input(value: Citrine::Signal.new("draft")) }
+      end
+    end
+
+    _out, err = capture_io { mount(klass) }
+
+    refute_match(/收到 Signal/, err)
   end
 end

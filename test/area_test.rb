@@ -267,12 +267,13 @@ class AreaTest < NativeTest
     assert_match(/size 传了 Proc/, err)
   end
 
-  # 未支持的 prop/样式仍按既有口径提醒（不静默）；area 自己消费的 prop 不该被误报
+  # 未支持的 prop/样式仍按既有口径提醒（不静默）；area 自己消费的 prop 与**视觉底板
+  # 样式**（L2：background / border* / border_radius）不该被误报
   def test_unsupported_style_and_props_still_warn
     Citrine.dev_mode = true
     klass = Class.new(Citrine::Component) do
       def view
-        element(:area, css_class: "panel", style: { background: "#000" },
+        element(:area, css_class: "panel", style: { color: "#fff", box_shadow: "0 1px 2px #000" },
                        size: [10, 10], scroll: true, watch: -> { 1 },
                        on_draw: ->(panel) { panel.rect(0, 0, 1, 1, fill: "#fff") })
       end
@@ -281,11 +282,29 @@ class AreaTest < NativeTest
     _out, err = capture_io { mount(klass) }
 
     assert_match(/css_class 在原生后端没有对应概念/, err)
-    assert_match(/样式键 :background 在原生后端不支持/, err)
+    # :color 是"只能自绘"，:box_shadow 是"没有对应概念"——按矩阵分档说清
+    assert_match(/样式键 :color 在原生后端不支持自动映射（需要自绘）/, err)
+    assert_match(/样式键 :box_shadow 在原生后端没有对应概念/, err)
     # size / scroll / watch 是本后端**自己消费**的 prop：既不该被说成"没有对应概念"，
     # watch: 也不该被基类当成"Proc 不会被求值"的误用
     refute_match(/属性 "(size|scroll|watch)"/, err)
     refute_match(/prop :watch 收到 Proc/, err)
+  end
+
+  # area 的视觉底板样式是**自己消费**的：不提醒（真画出来的断言见 style_matrix_test）
+  def test_area_visual_style_is_consumed_without_warning
+    Citrine.dev_mode = true
+    klass = Class.new(Citrine::Component) do
+      def view
+        element(:area, style: { background: "#101827", border: "1px solid #1e2b45", border_radius: 6 },
+                       size: [10, 10], scroll: true,
+                       on_draw: ->(panel) { panel.rect(0, 0, 1, 1, fill: "#fff") })
+      end
+    end
+
+    _out, err = capture_io { mount(klass) }
+
+    refute_match(/样式键 :(background|border|border_color|border_width|border_radius)/, err)
   end
 
   # ── 2) 事件分发与归一（设计 2.3）─────────────────────────
@@ -1127,5 +1146,97 @@ class AreaTest < NativeTest
     assert component.timer.stopped?, "on_unmount 里 stop"
     assert_equal ticks_at_unmount, component.ticks, "卸载后不该再被定时器叫醒"
     assert panel.destroyed?, "面板随组件销毁"
+  end
+
+  # ── F24：挂载期的"严格后端上会塌"提醒 ──────────────────
+  #
+  # 判据同 F11 / §5.7.2：面板自己能 stretchy，且从组件根往下的每一层 box 都 stretchy。
+  # 这条提醒**不看几何**（挂载期拿不到），因此它能在 Windows 的 0×0 情形下也亮——
+  # 那种形状里 Draw 不跑，绘制期的 warn_starved_area 永远不会触发。
+
+  def flexible_panel(**options)
+    element(:area, size: [10, 10], scroll: true, on_draw: ->(panel) { panel.rect(0, 0, 1, 1, fill: "#fff") },
+                   **options)
+  end
+
+  def test_strict_chain_warning_when_area_itself_is_not_stretchy
+    Citrine.dev_mode = true
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack(gap: 4, style: { flex_grow: 1 }) do
+          label { "head" }
+          element(:area, size: [10, 10], scroll: true, on_draw: ->(panel) { panel.rect(0, 0, 1, 1, fill: "#fff") })
+        end
+      end
+    end
+
+    _out, err = capture_io { mount(klass) }
+
+    assert_match(/这个面板撑不开/, err)
+    assert_match(/\*\*面板自己\*\*没有 stretchy 尺寸/, err)
+    assert_match(/0×0 且\*\*一次都不绘制\*\*/, err, "要说清为什么绘制期提醒帮不上忙")
+  end
+
+  def test_strict_chain_warning_points_at_the_broken_ancestor
+    Citrine.dev_mode = true
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack(gap: 4, style: { flex_grow: 1 }) do       # 1 层：没问题
+          stack(gap: 4) do                              # 2 层：链在这里断
+            element(:area, size: [10, 10], scroll: true,
+                           style: { flex_grow: 1 },
+                           on_draw: ->(panel) { panel.rect(0, 0, 1, 1, fill: "#fff") })
+          end
+        end
+      end
+    end
+
+    _out, err = capture_io { mount(klass) }
+
+    assert_match(/祖先里第 2 层那个 box/, err, "要把断在哪一层说清楚")
+    refute_match(/\*\*面板自己\*\*/, err)
+  end
+
+  def test_no_strict_chain_warning_for_a_complete_chain
+    Citrine.dev_mode = true
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack(gap: 4, style: { flex_grow: 1 }) do
+          label { "head" }
+          element(:area, size: [10, 10], scroll: true, style: { flex_grow: 1 },
+                         on_draw: ->(panel) { panel.rect(0, 0, 1, 1, fill: "#fff") })
+        end
+      end
+    end
+
+    _out, err = capture_io { mount(klass) }
+
+    refute_match(/撑不开/, err)
+  end
+
+  def test_strict_chain_warning_is_silent_outside_dev_mode
+    Citrine.dev_mode = false
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack(gap: 4) { element(:area, size: [10, 10], scroll: true, on_draw: ->(panel) { panel.rect(0, 0, 1, 1, fill: "#fff") }) }
+      end
+    end
+
+    _out, err = capture_io { mount(klass) }
+
+    assert_empty err
+  end
+
+  def test_strict_chain_warning_ignores_trees_without_areas
+    Citrine.dev_mode = true
+    klass = Class.new(Citrine::Component) do
+      def view
+        stack(gap: 4) { label { "只有标签" } }
+      end
+    end
+
+    _out, err = capture_io { mount(klass) }
+
+    refute_match(/撑不开/, err)
   end
 end

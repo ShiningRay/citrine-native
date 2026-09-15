@@ -199,10 +199,15 @@ class SmokePanel < Citrine::Component
     # 布局遵循 F11 判据（Windows 实测补齐）：参与拉伸的 box 自己要有 stretchy 尺寸、
     # 逐层成立——Windows 的 libui box 是严格的，断链处 area 塌成 0×0 且 Draw 不触发
     # （macOS 对窗口直系子元素宽容，同一棵树在 macOS 上看不出来）。
+    #
+    # 底板走**视觉样式**（L2）：background / border / border_radius 由框架在 on_draw
+    # 之前画一次，应用只管内容——真 GUI 路径因此会走 libui 的圆角路径
+    # （uiDrawPath 的 arc，桩后端测不到）。
     stack(gap: 6, style: { flex_grow: 1 }) do
       label(ref: :hint) { "cells=#{cells.size}" }
       element(:area, ref: :panel, scroll: true, size: [320, 600],
-                     style: { flex_grow: 1 },
+                     style: { flex_grow: 1, background: "#14203a",
+                              border: "1px solid #1e2c48", border_radius: 8 },
                      watch: -> { cells.size },
                      on_draw: ->(panel) { paint(panel) },
                      on_click: ->(event) { note(:click, event) },
@@ -218,7 +223,7 @@ class SmokePanel < Citrine::Component
   def paint(panel)
     @paints << [panel.width, panel.height]
     @clips << panel.clip_rect
-    panel.rect(0, 0, panel.width, panel.height, fill: "#14203a", stroke: "#1e2c48")
+    # 底色与描边由框架的视觉样式画（上面的 style:）——这里只画内容
     panel.line(0, 0, panel.width, panel.height, color: "#1e2c48", width: 1)
     panel.polyline([[0, 0], [40, 60], [90, 20]], color: "#31456b", width: 2)
     panel.polygon([[0, 0], [60, 0], [30, 50]], fill: "#20304f", stroke: "#31456b")

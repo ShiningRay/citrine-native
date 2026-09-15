@@ -17,3 +17,13 @@ desc "真控件冒烟：真窗口 + 真主循环（窗口会闪现一下；CI �
 task :gui_smoke do
   sh "bundle exec ruby test/support/libui_scenario.rb --gui"
 end
+
+desc "两个 demo 的真窗口端到端验收（真拉起 + 真点击 + 控件标题回读；需要同级仓库，仅 Windows）"
+task :demo_acceptance do
+  sh "bundle exec ruby test/support/demo_acceptance.rb #{ENV.fetch('DEMO', 'all')}"
+end
+
+desc "消费端冒烟：本地构建两个 gem → 装进干净 GEM_HOME → 仓库外 require 并渲染（需要同级 citrine）"
+task :consumer_smoke do
+  sh "bundle exec ruby test/support/consumer_smoke.rb"
+end

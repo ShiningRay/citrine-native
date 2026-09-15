@@ -149,4 +149,76 @@ class AppTest < Minitest::Test
   ensure
     app&.teardown
   end
+
+  # ── 信号与退出路径（E3：launcher 的三段逻辑收进框架）───────────
+
+  # 信号处理器是**进程级**全局状态：测试自己装、自己还原
+  def with_signal_guard(*names)
+    saved = names.to_h { |name| [name, trap(name, "DEFAULT")] }
+    yield
+  ensure
+    saved&.each { |name, handler| trap(name, handler) }
+  end
+
+  # 只装本平台**实际存在**的信号（Windows 没有 HUP/QUIT/ALRM，trap 会 ArgumentError）
+  def test_trap_quit_registers_only_available_signals
+    with_signal_guard("INT") do
+      app = Citrine::Native::App.new(TestCounter, widgets: @backend)
+
+      assert_equal %w[INT], app.trap_quit!(signals: %w[INT NOT_A_REAL_SIGNAL])
+    end
+  end
+
+  def test_trap_quit_resolves_the_default_set
+    with_signal_guard("INT", "TERM") do
+      app = Citrine::Native::App.new(TestCounter, widgets: @backend)
+      registered = app.trap_quit!(signals: :default)
+
+      # 各平台取交集后都至少有 INT 与 TERM（platform-matrix.md 第三节）
+      assert_includes registered, "INT"
+      assert_includes registered, "TERM"
+      assert_equal registered.uniq, registered
+    end
+  end
+
+  # 真实投递：信号到达 → quit（→ 主循环退出 → run 的 ensure 走有序拆解）
+  def test_delivered_signal_quits_the_app
+    with_signal_guard("INT") do
+      app = Citrine::Native::App.new(TestCounter, widgets: @backend)
+      quits = 0
+      app.define_singleton_method(:quit) { quits += 1 }
+      app.trap_quit!(signals: %w[INT])
+
+      Process.kill("INT", Process.pid)
+      sleep 0.05 # 信号处理在主线程安全点执行
+
+      assert_equal 1, quits, "INT 到达后应退出主循环（正式路径里由此走有序拆解）"
+    end
+  end
+
+  # 默认**不**接管进程级信号：库被嵌入时不能悄悄改宿主的处理器
+  def test_run_does_not_take_over_signals_by_default
+    with_signal_guard("INT") do
+      sentinel = proc { :keep }
+      trap("INT", sentinel)
+      @backend.on_main_loop { |backend| backend.fire_closing(backend.window) }
+
+      Citrine::Native.run(TestCounter, widgets: @backend)
+
+      assert_same sentinel, trap("INT") { }, "默认不该替换宿主的信号处理器"
+    end
+  end
+
+  # 显式要求时才接管（脚本即应用：Ctrl+C / SIGTERM 走有序拆解）
+  def test_run_takes_over_signals_when_asked
+    with_signal_guard("INT") do
+      sentinel = proc { :keep }
+      trap("INT", sentinel)
+      @backend.on_main_loop { |backend| backend.fire_closing(backend.window) }
+
+      Citrine::Native.run(TestCounter, signals: :default, widgets: @backend)
+
+      refute_same sentinel, trap("INT") { }, "signals: :default 时应装上退出处理器"
+    end
+  end
 end

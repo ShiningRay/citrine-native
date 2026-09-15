@@ -47,6 +47,10 @@ class LibuiBackendTest < Minitest::Test
     assert_equal 0, status.exitstatus, "GUI 冒烟失败：\n#{out}\n#{err}"
     assert_match(/SMOKE_OK/, out)
     assert_match(/主循环下的点击计数/, out)
+    # 绘制期的异常被适配层的 safe() 吞掉后只打 stderr（不让它穿过 Fiddle 栈），
+    # 所以"stderr 干净"是"真绘制路径没抛异常"的唯一机器可验证形式（L2 的圆角
+    # 底板就走这条路径：uiDrawPath 的 arc 只有真后端有）
+    assert_empty err, "GUI 绘制路径不该往 stderr 写东西"
   end
 
   private
