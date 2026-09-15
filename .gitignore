@@ -1,8 +1,2 @@
-/.bundle/
-/pkg/
-/tmp/
-/coverage/
+Gemfile.lock
 *.gem
-
-# macOS
-.DS_Store

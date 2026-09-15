@@ -17,14 +17,18 @@ module Citrine
     #     ——五个回调槽必须在创建时全部装上
     module Widgets
       class << self
-        # 默认后端：libui（决策 N-1）。测试注入 Memory 后端：
+        # 默认后端：核心包不带控件实现，解析交给 Citrine::Native.default_backend
+        # （后端包被 require 时自设，如 -libui 设 :libui）。测试注入 Memory 后端：
         #   Renderer.new(widgets: Widgets::Memory.new)
         def default
-          require_relative "widgets/libui"
-          Libui.new
+          backend = Citrine::Native.default_backend
+          raise Citrine::Native::BackendNotSelectedError,
+                "没有选择后端：请传 backend: / widgets:，或先 require 后端 gem"                 "（citrine-native-libui / citrine-native-gtk）" unless backend
+
+          Citrine::Native.resolve_backend(backend)
         end
 
-        # 内存打桩后端（CRuby 单测用；不加载 libui）
+        # 内存打桩后端（CRuby 单测用；不加载任何 UI 工具包）
         def memory
           Memory.new
         end

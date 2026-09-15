@@ -1,71 +1,13 @@
 name: Release
 
-# RubyGems Trusted Publishing（OIDC）：打 v* 标签即在**无任何 secret** 的情况下
-# 构建并发布 gem。与主仓 citrine（.github/workflows/release.yml）同一模式，但
-# 拆成两个 job——本仓没法照搬它的单 job 结构，两个实测教训（v0.1.0 首发两次红）：
-#
-#   ① 门禁不能跑 ubuntu：libui 的 GTK 后端在没有显示服务器的 runner 上是 C 层
-#      g_error 直接 abort（"Cannot open display"），Ruby 的 rescue 拦不住。
-#      → gate 与 CI（ci.yml）同一矩阵：macos-latest + windows-latest 真跑。
-#   ② 发布 job 的仓库必须在 workspace **根**：rubygems/release-gem 的 git 步骤
-#      （config --local / fetch tags）固定在根目录跑，而门禁要给 Gemfile 的
-#      path 依赖（`gem "citrine", path: "../citrine"`）摆同级目录，检出只能进
-#      子目录。release-gem 还要 `bundle exec rake release`——根检出下 Gemfile
-#      解析不了（path 依赖不在），重解析又会弄脏 Gemfile.lock（rake release 的
-#      guard_clean 会拦）。→ gem job 不走 release-gem，改用它内部同款的
-#      configure-rubygems-credentials（OIDC → ~/.gem/credentials）+ `gem push`，
-#      不需要 bundler，也没有"锁文件被弄脏"的问题。
-#
-# 一次性前置（仓库管理员在 rubygems.org 操作）：
-#   Account settings → Trusted Publishers → 注册本仓库
-#   （owner: ShiningRay，repo: citrine-native，workflow: release.yml，environment: 留空）
-#   注意：改名后 gem 是 citrine-native-libui，TP 要按新 gem 名再注册一次（旧注册只对 citrine-native 生效）。
-# 名称占用已确认：2026-09-15 查询 rubygems.org API，`citrine-native-libui` 未被占用。
-#
-# 发布流程：
-#   1. 确认 lib/citrine/native/version.rb 的 VERSION 与 CHANGELOG.md 的条目一致
-#   2. git tag v0.1.0 && git push origin v0.1.0
-#   3. 本工作流：gate（与 CI 同矩阵）→ gem（校验标签 → 构建 → 附产物 → OIDC 发布）
+# RubyGems Trusted Publishing（OIDC）：打 v* 标签即无 secret 构建发布。
+# 纯 Ruby 包（无 UI 工具包依赖），门禁在 ubuntu 上即可完整跑。
 on:
   push:
     tags: ["v*"]
 
 jobs:
-  # 门禁：与 CI 同矩阵，任何一台红了就不发布（gem job needs: gate）。
-  gate:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: citrine-native
-    steps:
-      # 开发期 Gemfile 用 `gem "citrine", path: "../citrine"`，所以门禁阶段两个仓库
-      # 要摆在同级目录
-      - uses: actions/checkout@v7
-        with:
-          repository: ShiningRay/citrine
-          path: citrine
-      - uses: actions/checkout@v7
-        with:
-          path: citrine-native
-
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "4.0"
-          bundler-cache: true
-          working-directory: citrine-native
-
-      - name: 发布门禁（与 CI 对齐：桩测 + 不开窗的真控件冒烟）
-        run: bundle exec rake
-
-  # 构建 + 发布：gem 是纯 Ruby 包（平台无关）；仓库检出在 workspace 根（见②）。
-  # 标签校验与 gem build 只读 gemspec（依赖走 RubyGems 的 citrine >= 0.2），
-  # 不需要开发期 path 依赖，因此不用检出 citrine、也不用跑 bundler。
   gem:
-    needs: gate
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -76,8 +18,8 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "4.0"
+          bundler-cache: true
 
-      # 版本一致性：标签必须与 version.rb 一致，否则装出来的 gem 与标签对不上
       - name: 校验标签与 VERSION 一致
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -88,17 +30,15 @@ jobs:
           fi
 
       - name: 构建 gem
-        run: gem build citrine-native-libui.gemspec
+        run: gem build citrine-native.gemspec
 
       - name: 附产物到 GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: citrine-native-libui-*.gem
+          files: citrine-native-*.gem
 
-      # 与 rubygems/release-gem 内部同款（它 pin 的就是这颗 SHA）：用 OIDC 换
-      # RubyGems API 凭据写进 ~/.gem/credentials，随后的 gem push 不需要任何 secret
       - name: 配置 Trusted Publishing 凭据（OIDC）
         uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
 
       - name: 发布到 RubyGems（gem push，OIDC 凭据，无需 API key）
-        run: gem push citrine-native-libui-*.gem
+        run: gem push citrine-native-*.gem

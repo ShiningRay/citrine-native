@@ -1,18 +1,7 @@
 name: CI
 
-# 主仓（citrine）CI 只覆盖 Ubuntu 上的平台无关核心；本仓是**原生运行时**，
-# 真正的回归面在 macOS 与 Windows 两种原生后端上（libui 的 Cocoa / Win32 实现）。
-# 2026-09-15 的 Windows 首测暴露的问题（AppKit 探针崩溃、strict stretchy 链）
-# 全是人工跑出来的——这条流水线就是为了把这类问题挡在合并前。
-#
-# 覆盖范围与边界：
-#   · 跑：`bundle exec rake`（桩后端语义测试 + **真控件冒烟的子进程**）
-#     —— 冒烟默认不开窗（`test/support/libui_scenario.rb` 不显示窗口），runner 上可跑
-#   · 不跑：GUI 模式（真窗口 + uiMain），它要靠 `CITRINE_NATIVE_GUI=1` 显式开启，
-#     留给人工与自托管 runner（GitHub 的 windows/macos runner 没有交互式桌面会话）
-#   · 不跑：Linux —— libui 的 GTK 后端需要系统 GTK 运行时，且无窗口环境下
-#     真控件路径会整体跳过（收益只剩桩测），暂不纳入
-
+# 核心包后端无关：全部测试跑 Memory 桩，不需要 GUI，ubuntu 即可。
+# 各后端包（-libui / -gtk）的 CI 由它们自己的仓库负责（真控件路径）。
 on:
   push:
     branches: [main]
@@ -24,22 +13,10 @@ concurrency:
 
 jobs:
   test:
-    name: Ruby ${{ matrix.ruby }} @ ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        # macOS（arm64-darwin）与 Windows（x64-mingw-ucrt）各自有预编译的 libui 包，
-        # 两种原生后端因此都能在标准 runner 上真跑；4.0 与本机验证环境（4.0.6）对齐
-        os: [macos-latest, windows-latest]
-        ruby: ["4.0"]
-    defaults:
-      run:
-        working-directory: citrine-native
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      # 开发期 Gemfile 用 `gem "citrine", path: "../citrine"`（发布后改走 RubyGems），
-      # 所以两个仓库要摆在同级目录：先取框架，再取本仓
+      # 开发期 Gemfile 用 `gem "citrine", path: "../citrine"`，两个仓库要同级
       - uses: actions/checkout@v7
         with:
           repository: ShiningRay/citrine
@@ -50,9 +27,10 @@ jobs:
 
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ${{ matrix.ruby }}
+          ruby-version: "4.0"
           bundler-cache: true
           working-directory: citrine-native
 
-      - name: 单元测试 + 真控件冒烟（不开窗）
+      - name: 单元测试（Memory 桩后端）
+        working-directory: citrine-native
         run: bundle exec rake

@@ -1,293 +1,49 @@
 # citrine-native
 
-Citrine 组件的 CRuby 原生运行时：不经 Opal/JS，`ruby app.rb` 直接把信号式
-组件跑成原生控件桌面应用（Shoes 精神）。
+Citrine 组件的 CRuby 原生运行时**核心**（后端无关）。用纯 Ruby 写信号式组件
+（[citrine](https://github.com/ShiningRay/citrine) 框架），不经 Opal/JS，直接在
+桌面窗口里渲染——**控件实现按后端选择**：
 
-**定位**：citrine 主仓（平台无关核心 + 渲染器协议）的一个外部 Port。
-同一份组件代码可跑在浏览器 DOM（Opal）/ Canvas / SSR / **原生控件（本 gem）**。
+| 后端 gem | 工具包 | `backend:` | 状态 |
+|---|---|---|---|
+| [citrine-native-libui](https://github.com/ShiningRay/citrine-native-libui) | [libui](https://github.com/libui-ruby/libui) | `:libui` | ✅ 可用（Windows/macOS 实测；控件外观受 libui 限制，见其样式矩阵） |
+| [citrine-native-gtk](https://github.com/ShiningRay/citrine-native-gtk) | GTK3（原生 CSS 主题） | `:gtk` | 🧪 试验（样式天花板问题的答案：原生控件可直接着色） |
+| citrine-native-qt | Qt | `:qt` | 规划中（同样的协议接口） |
 
-**状态**：**N0–N4 全部完成，0.1.0 待发布**（Roadmap 见 [GOALS.md](GOALS.md)）。
-能力：原生控件（stack/row/label/button/entry/checkbox）+ **自绘面板（area）**（绘制图元、
-鼠标/键盘事件、重绘调度、面板句柄、定时器）+ 样式能力矩阵 + 元素/事件支持矩阵；
-`examples/` 两个示例与两个真实应用（citrine-sheets / citrine-market-terminal 的原生版）都可跑。
-**macOS（Cocoa）与 Windows（Win32）两种 libui 实现均已实测跑通**，CI 覆盖两个平台。
-
-三份能力清单（改行为时要同步更新）：
-
-- [docs/design/native-area.md](docs/design/native-area.md) —— 自绘面板的冻结接口与实测边界
-- [docs/design/style-matrix.md](docs/design/style-matrix.md) —— **样式能力矩阵**：
-  样式键在原生后端的落点（`:mapped` / `:painted` / `:ignored`）
-- [docs/design/element-event-matrix.md](docs/design/element-event-matrix.md) —— **元素/事件支持矩阵**
-- [docs/design/platform-matrix.md](docs/design/platform-matrix.md) —— **平台能力矩阵**（macOS ↔ Windows）
-- [docs/design/semantics-coverage.md](docs/design/semantics-coverage.md) —— 语义覆盖（主仓断言 ↔ 本后端）
-
-## 安装与运行
-
-从 RubyGems 安装（0.1.0 起）：
-
-```bash
-gem install citrine-native-libui   # 依赖 citrine（核心）与 libui（原生控件动态库，含预编译包）
-```
-
-在本仓库开发：
-
-```bash
-bundle install                          # citrine 依赖开发期指向 ../citrine（path）
-bundle exec ruby examples/counter.rb    # 起真窗口；点按钮，计数精确 +1
-bundle exec ruby examples/todo.rb       # 输入 + 添加 + 勾选 + 删除
-```
-
-在自己的应用里：
+## 用法
 
 ```ruby
-require "citrine-native-libui"
+require "citrine-native"
 
 class Counter < Citrine::Component
-  state :count, default: 0        # 三宏收关键字参数
+  state :count, default: 0
 
   def view
     stack(gap: 8) do
       label { "计数：#{count}" }
-      button(on_click: -> { self.count += 1 }) { "点我 +1" }   # 文本走 block
+      button(on_click: -> { self.count += 1 }) { "点我 +1" }
     end
   end
 end
 
-Citrine::Native.run(Counter, title: "计数器", width: 400, height: 300)
+Citrine::Native.run(Counter, backend: :libui, title: "计数器", width: 400, height: 300)
 ```
 
-`Citrine::Native.run(组件类或实例, title:, width:, height:, dev_mode:, activate:)`
-建窗口、挂载组件、进主循环（阻塞到窗口关闭），关窗后按序拆解（卸载组件 → 销毁窗口 →
-反初始化）。要自己管事件循环就用 `Citrine::Native.start`（只建窗口挂组件）。
+组件代码与渲染目标完全解耦：同一份组件可以跑浏览器 DOM（Opal）、SSR 与任何
+原生后端。约定：后端 gem 名 = `citrine-native-<名字>`，控件适配类 =
+`Citrine::Native::Widgets::<Camel>(名字)`；非常规命名用
+`Citrine::Native.register_backend` 注册。
 
-`activate:`（默认 `true`）在显示窗口后**激活应用**——macOS 下不激活时窗口不是 key window，
-键盘事件一个也收不到（见设计 2.3 的实测）；不想抢用户焦点时传 `activate: false`，
-代价是要先点一下面板才能用键盘。
+## 本包含什么
 
-## 自绘面板（area）与定时器（NA-1）
+| 部分 | 说明 |
+|---|---|
+| `Renderer` | 节点树 → 控件树翻译（keyed 复用、块级重建、错误边界、透明容器） |
+| `App` | 窗口生命周期、主循环、信号处理（`signals: :default`） |
+| `StyleMatrix` | 样式键的三档落点（`:mapped` / `:painted` / `:ignored`） |
+| `Painter` 协议 | 自绘面板图元签名 + 参数归一 + `Recording` 桩 |
+| `Widgets::Base` | 控件适配协议（后端实现它）+ `Widgets::Memory` 桩 |
+| `Timer` | `Citrine::Native.every / after` |
 
-libui 的 box 没有背景/边框、label 没有颜色、只有 button/entry/checkbox 可点——
-数据密集区（表格线、涨跌红绿、图表）和"任意位置可点 + 键盘操作"要靠**自绘面板**：
-
-```ruby
-class Quote < Citrine::Component
-  state :rows, default: [["贵州茅台", 1288.50], ["宁德时代", 198.20]]
-
-  def view
-    stack(gap: 6) do
-      element(:area, ref: :panel,          # refs[:panel] → AreaHandle
-                     size: [320, 600],     # 仅 scroll: true 时生效（滚动内容尺寸）
-                     scroll: true,
-                     watch: -> { rows.size },            # 响应式：依赖变化即重绘
-                     on_draw: ->(p) { draw(p) },
-                     on_click: ->(ev) { pick(ev.x, ev.y) },
-                     on_key: { "ArrowDown" => :move_down, "Enter" => :commit, else: :type })
-    end
-  end
-
-  def draw(p)
-    p.rect(0, 0, p.width, p.height, fill: "#14203a", stroke: "#1e2c48")
-    rows.each_with_index do |(name, price), i|
-      y = 8 + i * 22
-      p.text(name, x: 8, y: y, color: "#e6ecf8", size: 13)
-      p.text(price.to_s, x: 200, y: y, color: "#4ecb71", size: 13, weight: :bold,
-                         align: :right, width: 100)   # 对齐要同时给 width
-    end
-    p.line(0, 0, p.width, p.height, color: "#1e2c48", width: 1)
-    p.clip(0, 0, p.width, 40) { p.rect(0, 0, p.width, 40, fill: "#0b1424") }
-  end
-end
-
-handle = refs[:panel]              # Citrine::Native::AreaHandle（不是 libui 裸指针）
-handle.repaint                     # 手动标脏重画
-handle.scroll_to(0, 200, 320, 120) # 仅滚动面板：把内容坐标里这块滚进视口
-handle.focus                       # 把键盘焦点给面板（macOS；做不到时返回 false）
-
-@ticker = Citrine::Native.every(200) { self.tick }   # 周期定时器（主线程执行）
-@once   = Citrine::Native.after(500)  { self.refresh }
-on_unmount { @ticker.stop; @once.stop }              # #stop 幂等，卸载时记得停
-```
-
-图元：`rect`（可圆角）/`line`/`polyline`/`polygon`（面积图）/`text`（颜色+字号+字重+字体）/
-`measure_text`/`clip`；另有两个只读属性 `width`/`height`（面板内容尺寸）与
-`clip_rect`（当前可见区，内容坐标——滚动面板下随滚动位置变化、**不含滚动条**，
-可用它只画看得见的部分）。
-颜色接受 `"#rgb"` / `"#rrggbb"` / `"#rrggbbaa"` / `[r,g,b(,a)]`（0..1 浮点）/ `:none`；
-字号字重从字体描述符来，颜色作为属性烘进文本布局。**每帧新建 Painter，文本布局按
-(文本, 字号, 字重, 字体, 颜色, 宽度, 对齐) 在面板级缓存里复用**（否则每帧每格新建会掉帧）。
-`text` 的 `(x, y)` 是外接矩形**左上角**（不是基线）；`align:` 只在同时给 `width:` 时生效。
-在 `on_draw` 里调 `handle.repaint` 是安全的（适配层把请求排到下一帧，自排队动画可跑）。
-
-`Widgets::Memory` 桩后端把 `on_draw` 交给 `Painter::Recording`（记录图元调用序列），
-测试可以直接断言"画了什么"：
-
-```ruby
-rec = backend.fire_draw(area)                 # 桩后端跑一次绘制
-rec.types                                     # => [:rect, :text, :text]
-rec.calls_of(:text).first[:color]             # => [0.9, 0.3, 0.3, 1.0]
-backend.fire_click(area, 12, 34)              # 合成点击/按键/移动
-backend.fire_key(area, "ArrowDown", modifiers: { shift: true })
-```
-
-## 支持的元素与样式（v0）
-
-| DSL | 原生控件 | 说明 |
-|---|---|---|
-| `stack { }` / `row { }` / `box(direction:)` | 竖排 / 横排 box | 方向必须静态（控件创建后不能换方向） |
-| `label { "…" }` | `uiNewLabel` | |
-| `button(on_click:) { "…" }` | `uiNewButton` | 文本走 block |
-| `text_input(value:, type: "password")` | `uiNewEntry` / `uiNewPasswordEntry` | `value:` 传 Signal 即受控双向绑定 |
-| `check_box(checked:, on_change:)` | `uiNewCheckbox` | **没有内容位**：标签用相邻 `label { }` |
-| `element(:area, on_draw:, …)` | `uiNewArea` / `uiNewScrollingArea` | 自绘面板：见上一节；`ref:` 拿到 `AreaHandle` |
-
-样式按**能力矩阵**（[docs/design/style-matrix.md](docs/design/style-matrix.md)，72 个键三档）：
-
-- **自动映射**：`gap` / `padding*`（→ 容器 padding 的**有/无**两档）、
-  `flex_grow` / `flex`（→ 该子控件在父 box 里 stretchy，即吃掉剩余空间）
-- **自绘（area 自动消费）**：`background`、`border`（`"1px solid #rrggbb"` 或颜色串）、
-  `border_color` / `border_width`、`border_radius`——写在 `element(:area)` 上，
-  框架在 `on_draw` **之前**画一次底板，应用只管内容：
-
-  ```ruby
-  element(:area, scroll: true, size: [400, 300],
-                 style: { background: "#101827", border: "1px solid #1e2b45", border_radius: 8 },
-                 on_draw: ->(panel) { panel.text("内容", x: 12, y: 12, color: "#e7edf7") })
-  ```
-- **自绘（写在 on_draw 里）**：`color` / `font_size` / `font_weight` / `font_family` /
-  `text_align` 这些文字样式——原生 label / button 没有公开 API 能设字体与颜色
-- **无对应概念**：`width` / `height` / `margin*` / `align_items` / `box_shadow` /
-  `transition` / `overflow` 等；`disabled` 属性 → 控件禁用态
-
-`flex_grow` 在 libui 里只是**"stretchy"开关、不是权重**：同一 box 里两个 stretchy
-子控件**等分**剩余空间。
-**其余样式键与 HTML 专属属性在 dev_mode 下按矩阵分档提醒**（说清"为什么 / 怎么办 / 去哪看"），
-绝不静默丢弃；未支持的元素（`textarea`/`select`/`table`/`img`…，18 个核心标签逐个有处置）
-直接抛 `UnsupportedElementError` 并给出替代建议（见元素/事件支持矩阵）。
-`css_class` 目前整块忽略（原生没有 CSS），两条后续路径见样式矩阵文档第九节。
-
-## 使用约束
-
-- **单线程**：控件回调、Signal 写入、Effect 重跑全在主线程，`Citrine.batch` 可直接用。
-  长任务（网络/文件）放后台线程，再用适配层的 `queue_main` 把更新排回主线程
-  （`uiQueueMain`）。
-- **回调里的异常不会中断应用**：打到 stderr 后继续跑主循环（异常穿过
-  Fiddle/Objective-C 栈可能把整个 GUI 带走）；组件内的错误请用 `error_fallback`。
-- **键盘在自绘面板上可用，原生输入控件上不行**：`on_key`/`window_key` 都由聚焦中的
-  `element(:area)` 转发（`App` 的 `activate:` 负责让窗口成为 key window）。
-  libui 的 entry 仍然不暴露按键事件，所以**"输入框里按回车"还是不可用**——
-  要么放一个按钮，要么由面板侧处理回车。原生 entry 上也会因此收不到 `window_key`。
-- **没有滚轮事件**：libui 的 `uiArea` 不投递滚轮（设计 2.2 的实测）；要滚动就用
-  `scroll: true` 的原生滚动条 + `AreaHandle#scroll_to`。
-- **面板尺寸**：`size:` 只在 `scroll: true`（滚动内容尺寸，**不是视口尺寸**）时生效；
-  非滚动面板的尺寸由外层容器布局决定（libui 的 `uiAreaSetSize` 只对滚动面板可用，
-  dev_mode 下会提醒）。**面板拿不到空间是静默的**（0×0、还会挤扁兄弟）——撑不撑得开
-  取决于它在**容器链逐层**有没有 stretchy 尺寸：**单个**面板在 stack 里不给 `flex_grow`
-  也能拿到剩余空间，"没有尺寸来源就 0×0"是过度概括（见下一条与设计 §5.7.2）。渲染器在
-  面板被压扁时给 dev_mode 提醒（0 尺寸、**非滚动**面板被挤成一条、以及滚动面板**真实
-  可见视口**被挤扁——最后这条靠读 clip view；滚动面板的**内容**尺寸矮不算"被挤扁"）。
-- **嵌套 box 的坑**（实测，两个 demo 都踩过）：libui 的 box 布局里，一个 box 能不能撑开
-  取决于**它自己在父容器里有没有 stretchy 尺寸**（`flex_grow`），逐层往上都要成立；
-  "每个嵌套 box 里都塞一个 stretchy 子控件"**既不必要也不充分**（反例：内层 box 自己
-  `flex_grow` 就够了；反过来内层 box 里有 stretchy 子控件、自己却没有，照样被压成 0 宽）。
-  例：`stack { label; row(style: { flex_grow: 1 }) { stack { area }; stack { label } }; label }`
-  整行只有 376×16 高——row 自己 stretchy 了，但它所在的 stack 高度被两个 label 钉死。
-  细节、反例与探针数据见 `docs/design/native-area.md` §5.7.2。与滚动无关，纯 label 同样复现。
-- **⌘ 组合键不会被面板吞掉**：面板声明了 `on_key` 时，⌘H 这类菜单快捷键照常生效
-  （回调仍然收到按键，所以应用自己处理的 ⌘Z/⌘B 不受影响）。
-- **绘制不裁剪到面板矩形**：画到面板外的内容会显示（AppKit `NSView` 默认
-  `clipsToBounds = NO`），`clip_rect` 是提示不是限制——想限制请自己 `clip`。
-- **`ref:` 拿到的是控件句柄**（`Fiddle::Pointer`），`element(:area)` 的 `ref:` 拿到的是
-  `Citrine::Native::AreaHandle`（不是 DOM 元素）。`ref:` 挂在**产出该元素的组件**上：
-  子组件里的 `refs[:grid]` 根组件看不到，要由子组件自己暴露读取器（见设计 2.5）。
-- 组件代码要可移植：只用平台无关 API，别 `require "citrine/browser"` / `citrine/canvas`，
-  别碰 `Native`/反引号 JS。
-
-## 开发
-
-```bash
-bundle exec rake                        # CRuby 单测（桩后端，不需要窗口）
-bundle exec rake gui_smoke              # 真窗口 + 真主循环（窗口会闪现一下）
-CITRINE_NATIVE_GUI=1 bundle exec rake   # 连 GUI 模式的真控件冒烟一起跑
-bundle exec rake consumer_smoke         # 消费端冒烟：把 gem 装进干净 GEM_HOME 再在仓库外用
-bundle exec rake demo_acceptance        # 真窗口端到端验收：N1/N2 示例 + 两个 demo（见下）
-```
-
-`rake consumer_smoke`（`test/support/consumer_smoke.rb`）本地构建 `citrine` 与
-`citrine-native` 两个 gem → 装进一个全新的 `GEM_HOME` → 在**仓库外**的空目录里
-`require "citrine-native-libui"` 并用它渲染一个组件（点击 +1）。它会断言**加载的是装好的那份**
-（`$LOADED_FEATURES` 指向临时 GEM_HOME），所以开发态的 path 依赖骗不过它。不联网、
-不碰工作树，临时目录自清理；需要同级 `citrine` 仓库。发布相关的用法见 [RELEASING.md](RELEASING.md)。
-
-`rake demo_acceptance`（`test/support/demo_acceptance.rb`）拉起**本仓的 N1/N2 验收示例**
-（`examples/counter.rb` / `examples/todo.rb`）与同级目录里的
-**citrine-sheets / citrine-market-terminal** 真窗口，用真鼠标点击、逐字符 `WM_CHAR` 打字，
-再回读应用自己的**控件标题**（`计数：3`、`待办：剩余 1 / 共 1`、`位置 D15`、`第 99 档`、
-`⏸ 暂停`↔`▶ 继续`）来断言状态变化，最后关窗并确认进程自行退出、log 干净。
-`DEMO=examples|counter|todo|sheets|market` 可只跑一个（共 58 项断言）。
-需要三个仓库同父目录（示例只用本仓）、且是**装了 libui 的那个 ruby**
-（仅 Windows；非 Windows 或仓库缺失时输出 SKIP 并 0 退出）。跑的时候窗口会真的弹出来抢鼠标。
-
-CI（`.github/workflows/ci.yml`）在 **macos-latest 与 windows-latest** 两个平台上跑
-`bundle exec rake`（桩测 + 不开窗的真控件冒烟）；真窗口路径留给人工与自托管 runner
-（`demo_acceptance` 也在此列——它要真屏幕与真鼠标）。
-发布走 Trusted Publishing（OIDC）：打 `v*` 标签触发 `.github/workflows/release.yml`——
-**一次性前置、发布步骤、发布后验证与出错处置都写在 [RELEASING.md](RELEASING.md)**；
-版本号 ↔ CHANGELOG ↔ gemspec ↔ 锁文件 ↔ 工作流的 Ruby 版本这几处的引用关系由
-`test/release_metadata_test.rb` 机器对拍（随套件跑）。
-
-测试分两层（对齐 GOALS 风险 3）：
-
-- **渲染语义**：`Widgets::Memory` 桩后端（控件树只有结构/文本/回调）——块级更新、
-  keyed 复用与重排、组件根落位、透明容器、错误边界、受控输入、自绘面板（事件/重绘/
-  句柄/提醒/定时器）、卸载不留活口
-- **真控件**：`test/support/libui_scenario.rb` 在**子进程**里跑（libui 撞到内部 bug 会
-  abort 进程）：默认不显示窗口，直接触发 libui 真正持有的回调闭包（含合成
-  `uiAreaMouseEvent`/`uiAreaKeyEvent`），验证点击精确 +1、容器重排的物理顺序、
-  真文本度量/换行/布局缓存释放、面板五个回调槽、⌘ 键的真闭包返回值（不吞菜单快捷键）、
-  拆解后 `uiUninit` 无泄漏；
-  `--gui` 模式追加真窗口路径：激活后窗口是 key window、`AreaHandle#focus`、
-  真绘制（矩形/折线/面积图/中文富文本/裁剪块）、`watch:` 与 `repaint` 驱动重画、
-  滚动后 `clip_rect` 跟着走、`clip_rect` 与 AppKit `visibleRect` 对拍、
-  滚动面板撑满容器、自排队动画真的持续出帧。
-
-⚠️ GUI 路径里"窗口是 key window / `#focus`"两条依赖 macOS 的**协作式激活**：同机有别的
-应用抢焦点（含其它 agent 的 GUI 进程）时会失败。判别是不是环境：起一个**不含 area** 的
-最小窗口看 `window_is_key?`——它也为假就是环境问题。
-
-## 仓库结构
-
-```
-lib/citrine-native.rb                 # gem 入口
-lib/citrine/native.rb                 # Citrine::Native 命名空间 + run/start/every/after + 异常
-lib/citrine/native/renderer.rb        # NativeRenderer：节点树 → 控件树（平台钩子）
-lib/citrine/native/style_matrix.rb    # 样式能力矩阵（机器可读的事实来源）
-lib/citrine/native/app.rb             # 窗口 + 主循环 + 激活 + 信号接管 + 有序拆解
-lib/citrine/native/painter.rb         # 自绘面板的绘制层（Painter / 文本布局缓存 / Recording）
-lib/citrine/native/pointer_event.rb   # 面板指针事件视图（平台无关）
-lib/citrine/native/area_handle.rb     # 面板句柄（repaint / scroll_to / focus）
-lib/citrine/native/timer.rb           # 定时器（后台线程 + queue_main）
-lib/citrine/native/widgets.rb         # 控件适配层协议（换 GTK 后端只换这一层）
-lib/citrine/native/widgets/libui.rb   # libui 后端（真控件 + macOS 直通桥）
-lib/citrine/native/widgets/memory.rb  # 内存桩后端（单测用）
-examples/counter.rb                   # N1 验收示例
-examples/todo.rb                      # N2 验收示例
-test/                                 # CRuby 单测 + 真控件冒烟 + demo 端到端验收 + 消费端冒烟脚本
-docs/design/native-area.md            # 自绘面板的冻结接口 + 实现说明
-docs/design/style-matrix.md           # 样式能力矩阵（三档落点）
-docs/design/element-event-matrix.md   # 元素/事件支持矩阵
-docs/design/platform-matrix.md        # 平台能力矩阵（macOS ↔ Windows）
-docs/design/semantics-coverage.md     # 语义覆盖（主仓断言 ↔ 本后端）
-docs/plan/backlog.md                  # 剩余问题与待决策项
-.github/workflows/ci.yml              # macOS + Windows 矩阵 CI
-.github/workflows/release.yml         # Trusted Publishing 发布
-RELEASING.md                          # 发布手册（一次性前置 + 发布步骤 + 发布后验证 + 出错处置）
-CHANGELOG.md                          # 版本化变更（使用者向）
-GOALS.md                              # 设计与计划主文档（含过程变更日志）
-```
-
-## 约束（贡献者向）
-
-- 只依赖 citrine 的平台无关核心，**禁止引入 Opal/JS**
-- 渲染器不直接调 libui API——一律经 `Widgets` 适配层（Painter 例外：它按设计只依赖
-  libui 的 draw/attributed-string 接口，放在 `native/painter.rb`）
-- 打包壳本期不做（非目标，见 GOALS 第二节）
+**本包不含任何控件实现**，也不依赖任何 UI 工具包——那在后端 gem 里。
+后端能力差异（哪些能做/哪些降级）由后端包的文档给出。

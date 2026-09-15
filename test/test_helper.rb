@@ -1,9 +1,10 @@
 # frozen_string_literal: true
 
-# 单测公共入口：本 gem 的渲染语义测试全部跑在 Memory 桩后端上（GOALS 风险 3：
-# CI 不能开真窗口）。真控件的行为由 test/libui_backend_test.rb 以子进程冒烟覆盖。
+# 单测公共入口：核心与渲染语义测试全部跑在 Memory 桩后端上（GOALS 风险 3：
+# CI 不能开真窗口，也不需要任何 UI 工具包——核心连 libui/GTK 都不认识）。
+# 真控件的行为由各后端包的冒烟脚本覆盖（如 citrine-native-libui）。
 require "minitest/autorun"
-require "citrine-native-libui"
+require "citrine-native"
 
 # 渲染语义测试基类：一套组件 + 一个桩后端 + 一棵可断言的控件树。
 #
