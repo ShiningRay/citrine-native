@@ -247,6 +247,16 @@ rescue LoadError => e
   exit 0
 end
 
+# Linux 的 GTK 后端在没有显示服务器时**不是抛 Ruby 异常**，而是 C 层 g_error 直接
+# abort 进程（stderr "Cannot open display" → Gtk-ERROR，exitstatus 变 nil），
+# 下面的 rescue StandardError 拦不住——必须在 init 之前按环境预判，让测试侧跳过
+# （v0.1.0 首次发布的 ubuntu 门禁就是这么红的；CI 因此也一直不纳入 Linux）。
+if RbConfig::CONFIG["host_os"].match?(/linux/i) &&
+   ENV["DISPLAY"].to_s.empty? && ENV["WAYLAND_DISPLAY"].to_s.empty?
+  puts "LIBUI_UNAVAILABLE Linux 无显示服务器（DISPLAY/WAYLAND_DISPLAY 均空）"
+  exit 0
+end
+
 begin
   backend = Citrine::Native::Widgets.default
   backend.init

@@ -11,14 +11,20 @@ name: Release
 # 发布流程：
 #   1. 确认 lib/citrine/native/version.rb 的 VERSION 与 CHANGELOG.md 的条目一致
 #   2. git tag v0.1.0 && git push origin v0.1.0
-#   3. 本工作流跑门禁 → 构建 → 附产物到 GitHub Release → 发布到 RubyGems
+#   3. 本工作流跑门禁 → 校验标签 → 构建 → 附产物到 GitHub Release → 发布到 RubyGems
+#
+# **为什么是 macos-latest**：门禁里的真控件冒烟要 libui 真跑起来——
+#   · ubuntu 不行：libui 的 GTK 后端在没有显示服务器的 runner 上是 C 层 g_error
+#     直接 abort（"Cannot open display"），Ruby 的 rescue 拦不住；v0.1.0 首推就红在这。
+#   · windows-latest 也可以（同样是 CI 覆盖的原生后端）；选 macOS 是让门禁顺带覆盖
+#     ObjcBridge / AppKit 对照断言这一支。Windows 侧由 CI 矩阵在 main 的同一提交上守。
 on:
   push:
     tags: ["v*"]
 
 jobs:
   gem:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     permissions:
       contents: write
       id-token: write # Trusted Publishing（OIDC）必需
