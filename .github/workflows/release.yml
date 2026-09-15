@@ -13,14 +13,24 @@ jobs:
       contents: write
       id-token: write # Trusted Publishing（OIDC）必需
     steps:
+      # 开发期 Gemfile 用 `gem "citrine", path: "../citrine"`，setup-ruby 的
+      # bundle lock 需要这个目录存在
       - uses: actions/checkout@v7
+        with:
+          repository: ShiningRay/citrine
+          path: citrine
+      - uses: actions/checkout@v7
+        with:
+          path: citrine-native
 
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "4.0"
           bundler-cache: true
+          working-directory: citrine-native
 
       - name: 校验标签与 VERSION 一致
+        working-directory: citrine-native
         run: |
           tag="${GITHUB_REF_NAME#v}"
           version="$(ruby -r./lib/citrine/native/version -e 'print Citrine::Native::VERSION')"
@@ -30,15 +40,17 @@ jobs:
           fi
 
       - name: 构建 gem
+        working-directory: citrine-native
         run: gem build citrine-native.gemspec
 
       - name: 附产物到 GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: citrine-native-*.gem
+          files: citrine-native/citrine-native-*.gem
 
       - name: 配置 Trusted Publishing 凭据（OIDC）
         uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
 
       - name: 发布到 RubyGems（gem push，OIDC 凭据，无需 API key）
+        working-directory: citrine-native
         run: gem push citrine-native-*.gem
