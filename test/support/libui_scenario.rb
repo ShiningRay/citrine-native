@@ -28,6 +28,7 @@ $LOAD_PATH.unshift(citrine_dev) if File.exist?(citrine_dev) && !$LOAD_PATH.inclu
 
 require "citrine-native"
 require "fiddle"
+require "rbconfig"
 
 module Smoke
   class << self
@@ -41,6 +42,11 @@ module Smoke
         puts "FAIL #{name}: 期望 #{expected.inspect}，实际 #{actual.inspect}"
         @failures += 1
       end
+    end
+
+    # 平台专属断言在别的平台记为跳过（不算失败）：AppKit 对照组只在 macOS 有意义
+    def skip(name, reason = "非 macOS 平台")
+      puts "skip #{name}（#{reason}）"
     end
 
     # 模拟用户操作：调用 libui 真正持有的那个回调闭包（gem 把闭包挂在句柄对象上）
@@ -58,7 +64,11 @@ Smoke.failures = 0
 
 # 冒烟侧的 AppKit 几何读法（**独立对照**：不信框架自己的读数，自己问 AppKit 要）。
 # Fiddle 拿不到 32 字节的结构体返回值，所以走 KVC + NSValue#getValue:size:
-# （参数全是指针，Fiddle 能表达）。只在 macOS 可用。
+# （参数全是指针，Fiddle 能表达）。只在 macOS 定义：Windows 等平台上框架侧
+# ObjcBridge 本来就 available? == false（回退 Clip*），这些对照断言整段跳过。
+MACOS = RbConfig::CONFIG["host_os"].match?(/darwin/i)
+
+if MACOS
 module AppKitProbe
   LIB = Fiddle.dlopen("/usr/lib/libobjc.A.dylib")
   SEL = Fiddle::Function.new(LIB["sel_registerName"], [Fiddle::TYPE_VOIDP], Fiddle::TYPE_VOIDP)
@@ -113,6 +123,7 @@ module AppKitProbe
   # 所以"焦点落在面板上"要用这条判据，不能直接比指针。
   def descendant_of?(view, ancestor) = BOOL3.call(view, sel("isDescendantOf:"), ancestor) != 0
 end
+end # MACOS
 
 class SmokeCounter < Citrine::Component
   state :count, default: 0
@@ -132,7 +143,10 @@ class SmokePlainPanel < Citrine::Component
   end
 end
 
-# 自排队动画（NA-2 P2.2）：画完就再标脏一次，指望下一帧接着画
+# 自排队动画（NA-2 P2.2）：画完就再标脏一次，指望下一帧接着画。
+# 布局遵循 F11 判据：bare area 直接当组件根会落进框架的非 stretchy 根容器
+# （renderer 的 setup_root）——Windows 的严格 stretchy 链在那里就断了（area 塌成
+# 0×0、一帧都不画），所以要包一层 stretchy stack（macOS 宽容看不出来）。
 class SmokeSelfDrivenPanel < Citrine::Component
   attr_reader :frames
 
@@ -142,7 +156,9 @@ class SmokeSelfDrivenPanel < Citrine::Component
   end
 
   def view
-    element(:area, ref: :panel, on_draw: ->(panel) { paint(panel) })
+    stack(style: { flex_grow: 1 }) do
+      element(:area, ref: :panel, style: { flex_grow: 1 }, on_draw: ->(panel) { paint(panel) })
+    end
   end
 
   def paint(panel)
@@ -180,9 +196,13 @@ class SmokePanel < Citrine::Component
   end
 
   def view
-    stack(gap: 6) do
+    # 布局遵循 F11 判据（Windows 实测补齐）：参与拉伸的 box 自己要有 stretchy 尺寸、
+    # 逐层成立——Windows 的 libui box 是严格的，断链处 area 塌成 0×0 且 Draw 不触发
+    # （macOS 对窗口直系子元素宽容，同一棵树在 macOS 上看不出来）。
+    stack(gap: 6, style: { flex_grow: 1 }) do
       label(ref: :hint) { "cells=#{cells.size}" }
       element(:area, ref: :panel, scroll: true, size: [320, 600],
+                     style: { flex_grow: 1 },
                      watch: -> { cells.size },
                      on_draw: ->(panel) { paint(panel) },
                      on_click: ->(event) { note(:click, event) },
@@ -299,6 +319,9 @@ if ARGV.include?("--gui")
       # 设计 2.3 的硬要求：显示窗口之后必须激活应用，否则窗口不是 key window、
       # 一个键也收不到（这条断言是那个实测结论的机器可验证形式）。
       # 激活的生效走主循环轮次，所以给几次机会再断言——别把系统时序当框架回归。
+      # macOS 专属：window_is_key? / makeFirstResponder: 走 ObjcBridge，其他平台
+      # 框架如实返回 false（Windows 下窗口激活与焦点由系统管理，无需等价断言）。
+      if defined?(AppKitProbe)
       keyed = false
       5.times do
         break if (keyed = backend.window_is_key?(panel_app.window))
@@ -341,6 +364,10 @@ if ARGV.include?("--gui")
 
       # 恢复：把焦点还给面板（后面还有别的断言依赖面板持有焦点）
       Smoke.check("焦点还给面板（后续断言依赖它）", panel_handle.focus, true)
+      else
+        Smoke.skip("App 激活/key window 断言")
+        Smoke.skip("AreaHandle#focus 的 makeFirstResponder 对照断言（成功/失败情形 + 恢复）")
+      end
       Smoke.check("真窗口下 on_draw 跑过", component.paints.size.positive?, true)
       Smoke.check("滚动面板的尺寸来自声明的内容尺寸（macOS 下 Draw 不报尺寸）",
                   component.paints.map { |(w, h)| [w, h] }.uniq, [[320.0, 600.0]])
@@ -357,7 +384,9 @@ if ARGV.include?("--gui")
 
       # D2 结论（NA-1c）：滚动面板**吃** flex_grow——控件自己撑满了容器给的空间。
       # 这正是 SHEETS-2 的最小复现里被误判的一条（"换 scroll: false 就撑满"是绘制溢出
-      # 造成的错觉，见 docs/design/native-area.md 5.7）。
+      # 造成的错觉，见 docs/design/native-area.md 5.7）。frame/visibleRect 读数走 AppKit，
+      # 非 macOS 跳过对照（框架侧回退 Clip*，几何断言只有 macOS 能独立复核）。
+      if defined?(AppKitProbe)
       scroll_view = AppKitProbe.view_of(panel_handle.handle)
       scroll_frame = AppKitProbe.rect(scroll_view, "frame")
       Smoke.check("滚动面板的控件撑满了容器（flex_grow 对滚动面板有效）",
@@ -375,6 +404,9 @@ if ARGV.include?("--gui")
       expected = [visible[:w].clamp(0.0, 320.0 - visible[:x]), visible[:h].clamp(0.0, 600.0 - visible[:y])]
       Smoke.check("clip_rect 就是真实可见区（夹在声明的内容尺寸内）",
                   [clip[2].round, clip[3].round], expected.map(&:round))
+      else
+        Smoke.skip("滚动面板 frame/clip_rect 与 AppKit visibleRect 的对拍断言")
+      end
       panel_handle.scroll_to(0, 200, 320, 100) # 滚到内容 y=200 处（uiAreaScrollTo）
     end
     sleep 0.4
@@ -385,11 +417,15 @@ if ARGV.include?("--gui")
                   component.clips.last[1].positive?, true)
       Smoke.check("clip_rect 落在内容尺寸内",
                   component.clips.all? { |(x, y, w, h)| x >= 0 && y >= 0 && w.positive? && h.positive? }, true)
-      # 滚动后 clip_rect 的 origin 就是滚动偏移（与 AppKit 的 visibleRect 对拍）
+      # 滚动后 clip_rect 的 origin 就是滚动偏移（与 AppKit 的 visibleRect 对拍；macOS 专属）
+      if defined?(AppKitProbe)
       visible = AppKitProbe.rect(AppKitProbe.document_view_of(AppKitProbe.view_of(panel_handle.handle)),
                                  "visibleRect")
       Smoke.check("滚动后 clip_rect 的 origin 就是滚动偏移（对拍 AppKit visibleRect）",
                   component.clips.last[1].round, visible[:y].round)
+      else
+        Smoke.skip("滚动后 clip_rect origin 与 AppKit visibleRect 的对拍")
+      end
       panel_app.quit
     end
   end

@@ -68,6 +68,36 @@
    + dev_mode 提醒"，属实测结论，已进 GOALS 风险清单。
 
 
+## Windows 平台验证（2026-09-15 追加）
+
+上述交付全部在 macOS 上完成；同日在 **Windows**（Ruby 4.0.6 x64-mingw-ucrt + libui 0.2.4
+预编译包）复验并跑通两个 demo：
+
+| 项 | 结果 |
+|---|---|
+| 框架 `bundle exec rake`（含 `CITRINE_NATIVE_GUI=1` 真窗口） | **120 runs / 345 assertions / 0 failures / 0 skips** |
+| sheets `bin/native` | 起窗、网格绘制、点击选格、方向键、打字 `123`+Enter 提交重算全部实测通过（PowerShell 像素采样验证：方向键后 188 个采样点变化、编辑后 172 个） |
+| market `bin/native` | 起窗、行情每秒跳动（间隔采样 diff 1394/1192）、四面板绘制正常；`native:smoke` ✅（持 6 只走势图 **217px** ≥150） |
+| sheets `native:test` | 58 runs / 184 assertions / 0 failures |
+| market `native:test` / `rake test` | 85 runs / 1136 assertions / 0 failures；29 / 238 / 0 |
+
+**为此落地的改动**（此前全部只验证过 macOS）：
+
+- citrine-native：`libui_scenario.rb` 的 AppKitProbe 加 macOS 守卫（非 macOS 记 skip）；
+  `Widgets::Libui#init` 幂等 + `shutdown` 复位（Windows 二次 init 报"类已存在"；多 App
+  顺序复用 backend 时第一次 teardown 后必须允许重新 init）；冒烟场景两处布局补 flex_grow
+  （Windows 的 stretchy 链严格，断链处 area 塌成 0×0 且 Draw 不触发——细节见 GOALS 变更日志）。
+- citrine-market-terminal：`bin/native` 信号注册按 `Signal.list` 过滤（Windows 无
+  HUP/QUIT/ALRM）；根 box 与三列所在 row 补 `flex_grow: 1`；**chart.rb 把三段行情文字
+  （quote_head/quote_stats/tech_stats）从原生 label 改画进自绘面板**（Windows 上它们
+  合计 ~119px 把走势图压到 71px 画不出蜡烛；画进面板后 217px，macOS 同步受益）。
+  实测记录见其 `native/README.md` 新增的"Windows 平台"一节。
+- citrine-sheets：无需改动（stretchy 链本来就完整）。
+
+**遗留（macOS 侧待复跑）**：chart 文字并入绘制改变了 macOS 的布局（走势图应更高），
+下次在 macOS 上复跑 `native:smoke` 与 `rake test` 确认；Windows 的 `WindowSize` 最小尺寸
+下限不可用（macOS 专属 API），已有如实降级。
+
 ## 任务明细
 
 ### NA-1 原生自绘面板能力（框架）

@@ -26,6 +26,7 @@
 | F17 | "面板被压扁"提醒的阈值（24pt ≈ 一行文本）是**启发式**，且只看面板自己多大、**不看容器占比** | 真要做 20pt 高的细条面板会被提醒（dev_mode: false 可关）；"面板占容器极小比例"这种形状框架读不到容器几何，只能应用自己量。写在 §5.1 最后一条的"已知盲区" | 待决策（要不要给应用一个 opt-in 的阈值/开关） |
 | F18 | 滚动面板**首帧** `clip_rect` 偶发报成 NSScrollView 自己的尺寸（NA-1d 复跑：首帧 `[0,0,760,528]` vs 稳态 `[0,0,743,511]`；NA-2 4 次跑命中 2 次） | libui 在同一次 Draw 里才设 document view 的 frame，而框架的 `visibleRect` 读在它之前。只影响"首帧就按 `clip_rect` 裁剪并缓存"的应用 | 已写明（§5.7.6-6），不修 |
 | F19 | 两条**不可捕获/静默**的脆弱面：① KVC 未知键 / 对非滚动视图发 `documentView` 抛 **ObjC 异常**，`rescue StandardError` 抓不住 → 进程终止；② 面板销毁后拿缓存视图指针再读**不崩、给陈旧值**（实测 `[0,0,543,343]`） | 框架当前路径不可达，靠不变量兜住（只对 `record[:scroll]` 读 `visibleRect`、`draw_area` 查 `@areas`、`forget` 清 cache）；已写进 `ObjcBridge#rect_of` 注释与 §5.7.6-7 | 已写明，不修 |
+| F24 | **"面板被压扁"提醒在 Windows 的 0×0 情形永远不会亮**：提醒挂在 Draw 回调里（`warn_starved_area`），而 Windows 的 libui 对 stretchy 链断开的 area 是真的 0×0、`WM_PAINT` 不会来 → Draw 不跑 = 提醒不跑（macOS 上 0×0 面板仍有 Draw 所以能看到）。链断的静默失败与 F11 同根，且 Windows 更严格：框架 `setup_root` 的根容器那一层也算（2026-09-15 四象限探针：根/area 必须全 stretchy 才有高度） | 可能的修法是在 attach 时按"area 非 stretchy 且祖先链有非 stretchy box"提前提醒，但要对容器链做推断（误报风险），待决策 | 待决策 |
 
 ## 已确认不需要处理
 

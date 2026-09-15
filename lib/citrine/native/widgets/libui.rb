@@ -42,12 +42,19 @@ module Citrine
         # ── 工具包生命周期与主循环 ──────────────────────────────
 
         def init
+          # 幂等守卫：App#setup 会再调一次 init，而 Windows 的 libui 对二次 init
+          # 报"registering utility window class; code 1410 类已存在"（返回错误字符串、
+          # 打到 stderr）—— macOS 上第二次 init 是静默 no-op，看不出来。
+          return self if @initialized
+
           ::LibUI.init
+          @initialized = true
           self
         end
 
         def shutdown
           ::LibUI.uninit
+          @initialized = false # 允许下一轮 init（GUI 冒烟里多个 App 顺序复用同一 backend）
           self
         end
 
