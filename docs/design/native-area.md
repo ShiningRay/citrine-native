@@ -112,10 +112,18 @@ p.content_size                                         # 面板内容尺寸 [w, 
   `"ArrowUp"/"ArrowDown"/"ArrowLeft"/"ArrowRight"/"Enter"/"Escape"/"Tab"/"Backspace"/
   "Delete"/"Home"/"End"/"PageUp"/"PageDown"/"F1"…`，可打印字符给字符本身（`"a"`/`"1"`/`" "`），
   修饰键走 `shift?`/`ctrl?`/`alt?`/`meta?`。`on_key` 支持 Hash 键表（`{"Enter" => :commit, else: …}`）。
+  **`raw` 的形态是约定的一部分**（backlog F5）：它是原生侧的原始载荷 Hash
+  （`{kind: :key, key:, ext_key:, modifiers:, up:}`，转发窗口级按键时还有 `target:`），
+  **不是 nil、也不是对象**——`window_key` 应用会读 `raw[:target][:tagName]` 这类路径
+  （DOM 侧同一入口），换成对象会让它们当场崩。要加字段请往后加，别改已有键的含义。
 - 焦点（**已实测**，探针 /tmp/area_focus_probe4.rb）：窗口 `uiControlShow` 之后
   **不是 key window**（`[NSApp keyWindow]` 为 nil、`firstResponder` 为 nil）→ 一个键也收不到；
   调用 `[NSApp activateIgnoringOtherApps:YES]` 之后窗口变 key，且 **area 自动成为 first responder**，
   键盘事件实测可达（探针收到 `Key=97`（"a"）/`32`（空格）的按下与抬起）。
+  **这条只在 macOS 上成立**：Windows 上系统在 `uiControlShow` 之后自己把焦点给窗口，且
+  **点击面板即入焦点**（libui 的 `WM_LBUTTONDOWN` 自己 `SetFocus`）——"挂载即自动聚焦"
+  在 Windows 不可用（要用户先点一下面板）。两种实现的对照见
+  [platform-matrix.md](platform-matrix.md) 第一节。
   由此得到对实现的三条硬要求：
   1. `App` 在 `window_show` 之后必须**激活应用**（macOS；提供 `activate:` 选项可关），
      否则"窗口看得见、键盘用不了"；
@@ -269,6 +277,16 @@ area_scrollable? / window_activate`（`widgets.rb` 协议 + libui/Memory 两个�
   NSScrollView 自己的尺寸（含滚动条位，本机实测偏大 17pt：瞬态 743.5×16 vs 稳态 726.5×16）。
   触发与去重不受影响（每帧都查、按节点去重），**只有消息里的数字可能偏大**，提示文本里已如实
   标注（与 §5.7.6-6 记录的首帧 `clip_rect` 瞬态是同一件事）。
+
+**挂载期的"严格后端上会塌"提醒**（backlog F24，2026-09-15 落地）——上面三条判据都挂在
+**绘制回调**里，而 Windows 的 libui 对 stretchy 链断开的 area 是**完全**的 0×0、`WM_PAINT`
+不会来 → Draw 不跑 → 一条都不会亮（macOS 上 0×0 面板仍有 Draw，所以这个盲区只在 Windows 上
+看得见）。因此另开一条**挂载期**的静态判据（`Renderer#warn_strict_stretch_chain`，判据同
+§5.7.2）：面板自己能 stretchy，且从组件根往下的**每一层 box** 在各自父容器里都 stretchy；
+不满足就按节点去重提醒，并指出**断在第几层的哪个 box**（或"面板自己"）。它不看几何，所以
+措辞是"在严格后端（Windows）上会塌成 0×0 且一次都不绘制"，不假装量到了尺寸；
+只在 dev_mode 下出现。桩测锁了五条：面板自己不 stretchy / 祖先断在第 2 层 / 完整链不报 /
+dev_mode 关时静默 / 无 area 的树不报。
 
 ### 5.2 绘制（2.2）
 
