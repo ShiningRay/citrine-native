@@ -16,8 +16,12 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.1.0"
 
-  spec.files = Dir["lib/**/*.rb"] + %w[README.md LICENSE GOALS.md]
+  spec.files = Dir["lib/**/*.rb"] + %w[README.md LICENSE GOALS.md CHANGELOG.md]
   spec.require_paths = ["lib"]
+
+  # 与主仓 citrine 同口径的元数据（Gem 页面上的源码/变更入口）
+  spec.metadata["source_code_uri"] = spec.homepage
+  spec.metadata["changelog_uri"] = "#{spec.homepage}/blob/main/CHANGELOG.md"
 
   # 平台无关核心（signal / component / renderer 协议）由 citrine gem 提供
   spec.add_dependency "citrine", ">= 0.2"

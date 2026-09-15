@@ -6,12 +6,30 @@ Citrine 组件的 CRuby 原生运行时：不经 Opal/JS，`ruby app.rb` 直接�
 **定位**：citrine 主仓（平台无关核心 + 渲染器协议）的一个外部 Port。
 同一份组件代码可跑在浏览器 DOM（Opal）/ Canvas / SSR / **原生控件（本 gem）**。
 
-**状态**：N1/N2 完成（最小闭环 + 输入控件），**NA-1 完成：原生自绘面板（area）**
-——绘制图元、鼠标/键盘事件、重绘调度、面板句柄、定时器，Counter/Todo 两个示例
-可起真窗口。设计、UI 库选型（决策 N-1：v0 后端 = libui）与 Roadmap 见 [GOALS.md](GOALS.md)，
-自绘面板的冻结接口见 [docs/design/native-area.md](docs/design/native-area.md)。
+**状态**：**N0–N4 全部完成，0.1.0 待发布**（Roadmap 见 [GOALS.md](GOALS.md)）。
+能力：原生控件（stack/row/label/button/entry/checkbox）+ **自绘面板（area）**（绘制图元、
+鼠标/键盘事件、重绘调度、面板句柄、定时器）+ 样式能力矩阵 + 元素/事件支持矩阵；
+`examples/` 两个示例与两个真实应用（citrine-sheets / citrine-market-terminal 的原生版）都可跑。
+**macOS（Cocoa）与 Windows（Win32）两种 libui 实现均已实测跑通**，CI 覆盖两个平台。
+
+三份能力清单（改行为时要同步更新）：
+
+- [docs/design/native-area.md](docs/design/native-area.md) —— 自绘面板的冻结接口与实测边界
+- [docs/design/style-matrix.md](docs/design/style-matrix.md) —— **样式能力矩阵**：
+  样式键在原生后端的落点（`:mapped` / `:painted` / `:ignored`）
+- [docs/design/element-event-matrix.md](docs/design/element-event-matrix.md) —— **元素/事件支持矩阵**
+- [docs/design/platform-matrix.md](docs/design/platform-matrix.md) —— **平台能力矩阵**（macOS ↔ Windows）
+- [docs/design/semantics-coverage.md](docs/design/semantics-coverage.md) —— 语义覆盖（主仓断言 ↔ 本后端）
 
 ## 安装与运行
+
+从 RubyGems 安装（0.1.0 起）：
+
+```bash
+gem install citrine-native   # 依赖 citrine（核心）与 libui（原生控件动态库，含预编译包）
+```
+
+在本仓库开发：
 
 ```bash
 bundle install                          # citrine 依赖开发期指向 ../citrine（path）
@@ -122,12 +140,30 @@ backend.fire_key(area, "ArrowDown", modifiers: { shift: true })
 | `check_box(checked:, on_change:)` | `uiNewCheckbox` | **没有内容位**：标签用相邻 `label { }` |
 | `element(:area, on_draw:, …)` | `uiNewArea` / `uiNewScrollingArea` | 自绘面板：见上一节；`ref:` 拿到 `AreaHandle` |
 
-样式只映射两个键：`gap`（→ 容器 padding 的有/无）与 `flex_grow`（→ 该子控件在父 box
-里 stretchy，即吃掉剩余空间）。`disabled` 属性 → 控件禁用态。
+样式按**能力矩阵**（[docs/design/style-matrix.md](docs/design/style-matrix.md)，72 个键三档）：
+
+- **自动映射**：`gap` / `padding*`（→ 容器 padding 的**有/无**两档）、
+  `flex_grow` / `flex`（→ 该子控件在父 box 里 stretchy，即吃掉剩余空间）
+- **自绘（area 自动消费）**：`background`、`border`（`"1px solid #rrggbb"` 或颜色串）、
+  `border_color` / `border_width`、`border_radius`——写在 `element(:area)` 上，
+  框架在 `on_draw` **之前**画一次底板，应用只管内容：
+
+  ```ruby
+  element(:area, scroll: true, size: [400, 300],
+                 style: { background: "#101827", border: "1px solid #1e2b45", border_radius: 8 },
+                 on_draw: ->(panel) { panel.text("内容", x: 12, y: 12, color: "#e7edf7") })
+  ```
+- **自绘（写在 on_draw 里）**：`color` / `font_size` / `font_weight` / `font_family` /
+  `text_align` 这些文字样式——原生 label / button 没有公开 API 能设字体与颜色
+- **无对应概念**：`width` / `height` / `margin*` / `align_items` / `box_shadow` /
+  `transition` / `overflow` 等；`disabled` 属性 → 控件禁用态
+
 `flex_grow` 在 libui 里只是**"stretchy"开关、不是权重**：同一 box 里两个 stretchy
 子控件**等分**剩余空间。
-**其余样式键与 HTML 专属属性在 dev_mode 下提醒，绝不静默丢弃**；未支持的元素
-（`textarea`/`select`/`table`/`img`…）直接抛 `UnsupportedElementError` 并给出替代建议。
+**其余样式键与 HTML 专属属性在 dev_mode 下按矩阵分档提醒**（说清"为什么 / 怎么办 / 去哪看"），
+绝不静默丢弃；未支持的元素（`textarea`/`select`/`table`/`img`…，18 个核心标签逐个有处置）
+直接抛 `UnsupportedElementError` 并给出替代建议（见元素/事件支持矩阵）。
+`css_class` 目前整块忽略（原生没有 CSS），两条后续路径见样式矩阵文档第九节。
 
 ## 使用约束
 
@@ -169,10 +205,35 @@ backend.fire_key(area, "ArrowDown", modifiers: { shift: true })
 ## 开发
 
 ```bash
-bundle exec rake                        # CRuby 单测（桩后端，111 项，不需要窗口）
+bundle exec rake                        # CRuby 单测（桩后端，不需要窗口）
 bundle exec rake gui_smoke              # 真窗口 + 真主循环（窗口会闪现一下）
 CITRINE_NATIVE_GUI=1 bundle exec rake   # 连 GUI 模式的真控件冒烟一起跑
+bundle exec rake consumer_smoke         # 消费端冒烟：把 gem 装进干净 GEM_HOME 再在仓库外用
+bundle exec rake demo_acceptance        # 真窗口端到端验收：N1/N2 示例 + 两个 demo（见下）
 ```
+
+`rake consumer_smoke`（`test/support/consumer_smoke.rb`）本地构建 `citrine` 与
+`citrine-native` 两个 gem → 装进一个全新的 `GEM_HOME` → 在**仓库外**的空目录里
+`require "citrine-native"` 并用它渲染一个组件（点击 +1）。它会断言**加载的是装好的那份**
+（`$LOADED_FEATURES` 指向临时 GEM_HOME），所以开发态的 path 依赖骗不过它。不联网、
+不碰工作树，临时目录自清理；需要同级 `citrine` 仓库。发布相关的用法见 [RELEASING.md](RELEASING.md)。
+
+`rake demo_acceptance`（`test/support/demo_acceptance.rb`）拉起**本仓的 N1/N2 验收示例**
+（`examples/counter.rb` / `examples/todo.rb`）与同级目录里的
+**citrine-sheets / citrine-market-terminal** 真窗口，用真鼠标点击、逐字符 `WM_CHAR` 打字，
+再回读应用自己的**控件标题**（`计数：3`、`待办：剩余 1 / 共 1`、`位置 D15`、`第 99 档`、
+`⏸ 暂停`↔`▶ 继续`）来断言状态变化，最后关窗并确认进程自行退出、log 干净。
+`DEMO=examples|counter|todo|sheets|market` 可只跑一个（共 58 项断言）。
+需要三个仓库同父目录（示例只用本仓）、且是**装了 libui 的那个 ruby**
+（仅 Windows；非 Windows 或仓库缺失时输出 SKIP 并 0 退出）。跑的时候窗口会真的弹出来抢鼠标。
+
+CI（`.github/workflows/ci.yml`）在 **macos-latest 与 windows-latest** 两个平台上跑
+`bundle exec rake`（桩测 + 不开窗的真控件冒烟）；真窗口路径留给人工与自托管 runner
+（`demo_acceptance` 也在此列——它要真屏幕与真鼠标）。
+发布走 Trusted Publishing（OIDC）：打 `v*` 标签触发 `.github/workflows/release.yml`——
+**一次性前置、发布步骤、发布后验证与出错处置都写在 [RELEASING.md](RELEASING.md)**；
+版本号 ↔ CHANGELOG ↔ gemspec ↔ 锁文件 ↔ 工作流的 Ruby 版本这几处的引用关系由
+`test/release_metadata_test.rb` 机器对拍（随套件跑）。
 
 测试分两层（对齐 GOALS 风险 3）：
 
@@ -199,7 +260,8 @@ CITRINE_NATIVE_GUI=1 bundle exec rake   # 连 GUI 模式的真控件冒烟一起
 lib/citrine-native.rb                 # gem 入口
 lib/citrine/native.rb                 # Citrine::Native 命名空间 + run/start/every/after + 异常
 lib/citrine/native/renderer.rb        # NativeRenderer：节点树 → 控件树（平台钩子）
-lib/citrine/native/app.rb             # 窗口 + 主循环 + 激活 + 有序拆解
+lib/citrine/native/style_matrix.rb    # 样式能力矩阵（机器可读的事实来源）
+lib/citrine/native/app.rb             # 窗口 + 主循环 + 激活 + 信号接管 + 有序拆解
 lib/citrine/native/painter.rb         # 自绘面板的绘制层（Painter / 文本布局缓存 / Recording）
 lib/citrine/native/pointer_event.rb   # 面板指针事件视图（平台无关）
 lib/citrine/native/area_handle.rb     # 面板句柄（repaint / scroll_to / focus）
@@ -209,9 +271,18 @@ lib/citrine/native/widgets/libui.rb   # libui 后端（真控件 + macOS 直通�
 lib/citrine/native/widgets/memory.rb  # 内存桩后端（单测用）
 examples/counter.rb                   # N1 验收示例
 examples/todo.rb                      # N2 验收示例
-test/                                 # CRuby 单测 + 真控件冒烟脚本
+test/                                 # CRuby 单测 + 真控件冒烟 + demo 端到端验收 + 消费端冒烟脚本
 docs/design/native-area.md            # 自绘面板的冻结接口 + 实现说明
-GOALS.md                              # 设计与计划主文档
+docs/design/style-matrix.md           # 样式能力矩阵（三档落点）
+docs/design/element-event-matrix.md   # 元素/事件支持矩阵
+docs/design/platform-matrix.md        # 平台能力矩阵（macOS ↔ Windows）
+docs/design/semantics-coverage.md     # 语义覆盖（主仓断言 ↔ 本后端）
+docs/plan/backlog.md                  # 剩余问题与待决策项
+.github/workflows/ci.yml              # macOS + Windows 矩阵 CI
+.github/workflows/release.yml         # Trusted Publishing 发布
+RELEASING.md                          # 发布手册（一次性前置 + 发布步骤 + 发布后验证 + 出错处置）
+CHANGELOG.md                          # 版本化变更（使用者向）
+GOALS.md                              # 设计与计划主文档（含过程变更日志）
 ```
 
 ## 约束（贡献者向）

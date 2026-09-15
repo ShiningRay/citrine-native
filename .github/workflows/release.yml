@@ -1,0 +1,67 @@
+name: Release
+
+# RubyGems Trusted Publishing（OIDC）：打 v* 标签即在**无任何 secret** 的情况下
+# 构建并发布 gem，沿用主仓 citrine 的发布模式（.github/workflows/release.yml）。
+#
+# 一次性前置（仓库管理员在 rubygems.org 操作）：
+#   Account settings → Trusted Publishers → 注册本仓库
+#   （owner: ShiningRay，repo: citrine-native，workflow: release.yml，environment: 留空）
+# 名称占用已确认：2026-09-15 查询 rubygems.org API，`citrine-native` 未被占用（404）。
+#
+# 发布流程：
+#   1. 确认 lib/citrine/native/version.rb 的 VERSION 与 CHANGELOG.md 的条目一致
+#   2. git tag v0.1.0 && git push origin v0.1.0
+#   3. 本工作流跑门禁 → 构建 → 附产物到 GitHub Release → 发布到 RubyGems
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  gem:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # Trusted Publishing（OIDC）必需
+    steps:
+      # 开发期 Gemfile 用 `gem "citrine", path: "../citrine"`，所以门禁阶段两个仓库
+      # 要摆在同级目录；`gem build` 本身只读 gemspec（依赖走 RubyGems 的 citrine >= 0.2）
+      - uses: actions/checkout@v7
+        with:
+          repository: ShiningRay/citrine
+          path: citrine
+      - uses: actions/checkout@v7
+        with:
+          path: citrine-native
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+          bundler-cache: true
+          working-directory: citrine-native
+
+      - name: 发布门禁（与 CI 对齐：桩测 + 不开窗的真控件冒烟）
+        working-directory: citrine-native
+        run: bundle exec rake
+
+      # 版本一致性：标签必须与 version.rb 一致，否则装出来的 gem 与标签对不上
+      - name: 校验标签与 VERSION 一致
+        working-directory: citrine-native
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(ruby -r./lib/citrine/native/version -e 'print Citrine::Native::VERSION')"
+          if [ "$tag" != "$version" ]; then
+            echo "标签 $GITHUB_REF_NAME 与 VERSION $version 不一致" >&2
+            exit 1
+          fi
+
+      - name: 构建 gem
+        working-directory: citrine-native
+        run: gem build citrine-native.gemspec
+
+      - name: 附产物到 GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: citrine-native/citrine-native-*.gem
+
+      - name: 发布到 RubyGems（Trusted Publishing，无需 API key）
+        uses: rubygems/release-gem@v1
