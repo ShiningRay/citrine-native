@@ -1,0 +1,8 @@
+/.bundle/
+/pkg/
+/tmp/
+/coverage/
+*.gem
+
+# macOS
+.DS_Store
