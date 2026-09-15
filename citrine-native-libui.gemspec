@@ -3,13 +3,13 @@
 require_relative "lib/citrine/native/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "citrine-native"
+  spec.name = "citrine-native-libui"
   spec.version = Citrine::Native::VERSION
   spec.authors = ["ShiningRay"]
   spec.email = ["shiningray@users.noreply.github.com"]
 
   spec.summary = "CRuby native runtime for Citrine components (Shoes-style desktop apps)"
-  spec.description = "citrine-native：Citrine 组件的 CRuby 原生运行时。不经 Opal/JS，" \
+  spec.description = "citrine-native-libui：Citrine 组件的 CRuby 原生运行时（libui 后端）。不经 Opal/JS，" \
     "同一份信号式组件代码直接用 ruby 启动为桌面窗口应用（Shoes 精神）。" \
     "实现 Citrine::Renderer 协议，首版后端为 libui（原生控件）。"
   spec.homepage = "https://github.com/ShiningRay/citrine-native"

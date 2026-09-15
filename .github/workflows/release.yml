@@ -19,7 +19,8 @@ name: Release
 # 一次性前置（仓库管理员在 rubygems.org 操作）：
 #   Account settings → Trusted Publishers → 注册本仓库
 #   （owner: ShiningRay，repo: citrine-native，workflow: release.yml，environment: 留空）
-# 名称占用已确认：2026-09-15 查询 rubygems.org API，`citrine-native` 未被占用（404）。
+#   注意：改名后 gem 是 citrine-native-libui，TP 要按新 gem 名再注册一次（旧注册只对 citrine-native 生效）。
+# 名称占用已确认：2026-09-15 查询 rubygems.org API，`citrine-native-libui` 未被占用。
 #
 # 发布流程：
 #   1. 确认 lib/citrine/native/version.rb 的 VERSION 与 CHANGELOG.md 的条目一致
@@ -87,12 +88,12 @@ jobs:
           fi
 
       - name: 构建 gem
-        run: gem build citrine-native.gemspec
+        run: gem build citrine-native-libui.gemspec
 
       - name: 附产物到 GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          files: citrine-native-*.gem
+          files: citrine-native-libui-*.gem
 
       # 与 rubygems/release-gem 内部同款（它 pin 的就是这颗 SHA）：用 OIDC 换
       # RubyGems API 凭据写进 ~/.gem/credentials，随后的 gem push 不需要任何 secret
@@ -100,4 +101,4 @@ jobs:
         uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
 
       - name: 发布到 RubyGems（gem push，OIDC 凭据，无需 API key）
-        run: gem push citrine-native-*.gem
+        run: gem push citrine-native-libui-*.gem

@@ -57,14 +57,14 @@ bundle exec rake demo_acceptance  # 两个 demo + N1/N2 示例的真窗口端到
 
 ```bash
 # 1. 装发布出来的那个版本（不是本地构建的）
-gem install citrine-native
+gem install citrine-native-libui
 
 # 2. 冒烟：真窗口跑一个例子（需要 libui 的动态库）
 curl -O https://raw.githubusercontent.com/ShiningRay/citrine-native/main/examples/counter.rb
 ruby counter.rb            # 窗口出现、点按钮计数 +1
 
 # 3. 元数据对不对得上
-gem info citrine-native    # 版本、依赖（含过渡依赖 base64）、源码/变更入口
+gem info citrine-native-libui    # 版本、依赖（含过渡依赖 base64）、源码/变更入口
 ```
 
 `consumer_smoke` 与"装发布版"的区别（别把前者当后者）：脚本里的 `citrine` 是**从同级仓库
@@ -89,7 +89,7 @@ gem info citrine-native    # 版本、依赖（含过渡依赖 base64）、源�
 - [ ] 工作流能在 GitHub 的 runner 上装好依赖（`ruby/setup-ruby` + `bundler-cache`）并跑完门禁
 - [ ] OIDC 发布这一步通过（Trusted Publisher 注册的字段与实际运行的工作流文件名必须一致）
 - [ ] GitHub Release 上出现了 `.gem` 产物
-- [ ] `gem install citrine-native` 之后，新环境里 `require "citrine-native"` 可用（含 `base64` 过渡依赖是否已随 `citrine` 上游修复而可移除）
+- [ ] `gem install citrine-native-libui` 之后，新环境里 `require "citrine-native"` 可用（含 `base64` 过渡依赖是否已随 `citrine` 上游修复而可移除）
 
 ## 六、过渡依赖的移除条件
 

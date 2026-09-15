@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **gem 改名：`citrine-native` → `citrine-native-libui`**（2026-09-15）。libui 的原生控件不暴露外观 API
+  （按钮/输入框/窗口底色不可着色，见样式矩阵 L3 天花板），为后续尝试其他 UI 后端（如 GTK，原生支持 CSS）
+  腾出名字空间：gem 名带上后端标识。require 同步改为 `require "citrine-native-libui"`；
+  仓库与模块名（Citrine::Native）不变。rubygems.org 上的旧 `citrine-native 0.1.0` 保留不改。
+
 ## [0.1.0] - 2026-09-15
 
 首个发布版本：Citrine 组件的 CRuby 原生运行时（libui 后端），Roadmap N0–N4 全部完成。

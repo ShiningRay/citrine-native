@@ -9,7 +9,7 @@
 # 注意按钮文本走 block（与主仓 DSL 一致）：`button(on_click: ...) { "点我 +1" }`。
 
 begin
-  require "citrine-native"
+  require "citrine-native-libui"
 rescue LoadError
   require_relative "../lib/citrine-native"
 end

@@ -26,7 +26,7 @@ Citrine 组件的 CRuby 原生运行时：不经 Opal/JS，`ruby app.rb` 直接�
 从 RubyGems 安装（0.1.0 起）：
 
 ```bash
-gem install citrine-native   # 依赖 citrine（核心）与 libui（原生控件动态库，含预编译包）
+gem install citrine-native-libui   # 依赖 citrine（核心）与 libui（原生控件动态库，含预编译包）
 ```
 
 在本仓库开发：
@@ -40,7 +40,7 @@ bundle exec ruby examples/todo.rb       # 输入 + 添加 + 勾选 + 删除
 在自己的应用里：
 
 ```ruby
-require "citrine-native"
+require "citrine-native-libui"
 
 class Counter < Citrine::Component
   state :count, default: 0        # 三宏收关键字参数
@@ -214,7 +214,7 @@ bundle exec rake demo_acceptance        # 真窗口端到端验收：N1/N2 示�
 
 `rake consumer_smoke`（`test/support/consumer_smoke.rb`）本地构建 `citrine` 与
 `citrine-native` 两个 gem → 装进一个全新的 `GEM_HOME` → 在**仓库外**的空目录里
-`require "citrine-native"` 并用它渲染一个组件（点击 +1）。它会断言**加载的是装好的那份**
+`require "citrine-native-libui"` 并用它渲染一个组件（点击 +1）。它会断言**加载的是装好的那份**
 （`$LOADED_FEATURES` 指向临时 GEM_HOME），所以开发态的 path 依赖骗不过它。不联网、
 不碰工作树，临时目录自清理；需要同级 `citrine` 仓库。发布相关的用法见 [RELEASING.md](RELEASING.md)。
 

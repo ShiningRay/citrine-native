@@ -26,7 +26,7 @@ $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 citrine_dev = File.expand_path("../../../citrine/lib", __dir__)
 $LOAD_PATH.unshift(citrine_dev) if File.exist?(citrine_dev) && !$LOAD_PATH.include?(citrine_dev)
 
-require "citrine-native"
+require "citrine-native-libui"
 require "fiddle"
 require "rbconfig"
 

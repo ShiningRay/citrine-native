@@ -5,7 +5,7 @@
 # 设计与计划见 GOALS.md。本 gem 实现 `Citrine::Renderer` 的平台钩子（renderer.rb），
 # 把节点树翻译成原生控件树；只依赖 citrine 的平台无关核心，**不引入 Opal**。
 #
-#   require "citrine-native"
+#   require "citrine-native-libui"
 #
 #   class Counter < Citrine::Component
 #     state :count, 0

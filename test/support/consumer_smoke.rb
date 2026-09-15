@@ -11,7 +11,7 @@ $stdout.sync = true
 #
 #   1. 本地构建两个 gem（`gem build --output`，产物落在临时目录）
 #   2. 装进一个全新的 GEM_HOME（`gem install --local --ignore-dependencies`）
-#   3. 在仓库**外**的空目录里 `require "citrine-native"`，并断言**加载的是装好的那份**
+#   3. 在仓库**外**的空目录里 `require "citrine-native-libui"`，并断言**加载的是装好的那份**
 #      （看 `$LOADED_FEATURES` 指向临时 GEM_HOME，而不是工作树的 lib/）
 #   4. 用装好的 gem 把组件挂到 Memory 桩后端上跑一遍（点击 +1），断控件树
 #
@@ -87,18 +87,18 @@ Dir.mktmpdir("citrine-consumer-") do |tmp|
 
   # ── 1. 本地构建两个 gem ──────────────────────────────────
   citrine_gem = File.join(tmp, "citrine.gem")
-  native_gem = File.join(tmp, "citrine-native.gem")
+  native_gem = File.join(tmp, "citrine-native-libui.gem")
 
   out, status, built = build_gem(CITRINE_DIR, "citrine.gemspec", citrine_gem)
   Report.check("构建 citrine.gem", built, true)
   puts out.lines.last(3).map { |line| "      #{line}" }.join if !built || status != 0
   next unless built # 上游仓库构建不出来就到此为止（不是本仓的问题）
 
-  out, status, built = build_gem(ROOT, "citrine-native.gemspec", native_gem)
+  out, status, built = build_gem(ROOT, "citrine-native-libui.gemspec", native_gem)
   if built
-    puts "ok   构建 citrine-native.gem（#{File.size(native_gem)} 字节）"
+    puts "ok   构建 citrine-native-libui.gem（#{File.size(native_gem)} 字节）"
   else
-    Report.check("构建 citrine-native.gem", false, true)
+    Report.check("构建 citrine-native-libui.gem", false, true)
     puts out.lines.last(5).map { |line| "      #{line}" }.join
   end
   next unless built
@@ -111,15 +111,15 @@ Dir.mktmpdir("citrine-consumer-") do |tmp|
     puts out.lines.last(3).map { |line| "      #{line}" }.join unless status.zero?
   end
 
-  installed = Dir.glob(File.join(gem_home, "gems", "citrine-native-*")).first
-  Report.check_true("citrine-native 已装进临时 GEM_HOME", !installed.nil?, installed)
+  installed = Dir.glob(File.join(gem_home, "gems", "citrine-native-libui-*")).first
+  Report.check_true("citrine-native-libui 已装进临时 GEM_HOME", !installed.nil?, installed)
 
   # ── 3+4. 在仓库外 require，并用装好的那份跑一遍渲染 ──────
   probe = File.join(sandbox, "consumer_probe.rb")
   # 单引号 heredoc：探针脚本里的 `#{}` 必须原样写进去，不能被本脚本插值
   File.write(probe, <<~'RUBY')
     # 这个文件在仓库外的临时目录里，只有 gem 可用——加载到的必须是装好的那份
-    require "citrine-native"
+    require "citrine-native-libui"
 
     # Windows 的加载路径用反斜杠，正则两种分隔符都要认
     loaded = $LOADED_FEATURES.grep(%r{[\\/]citrine-native\.rb\z}).first.to_s
@@ -158,7 +158,7 @@ Dir.mktmpdir("citrine-consumer-") do |tmp|
   }
   out, status = run(RbConfig.ruby, probe, chdir: sandbox, env: env)
 
-  Report.check("仓库外 `require \"citrine-native\"` 成功", status.zero?, true)
+  Report.check("仓库外 `require \"citrine-native-libui\"` 成功", status.zero?, true)
   version_line = out[/^VERSION=(.+)$/, 1]
   Report.check("版本号与 version.rb 一致", version_line, Citrine::Native::VERSION)
 

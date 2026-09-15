@@ -19,7 +19,7 @@ class ReleaseMetadataTest < Minitest::Test
 
   def read(relative) = File.read(File.join(ROOT, relative), encoding: "UTF-8")
 
-  def gemspec = @gemspec ||= Gem::Specification.load(File.join(ROOT, "citrine-native.gemspec"))
+  def gemspec = @gemspec ||= Gem::Specification.load(File.join(ROOT, "citrine-native-libui.gemspec"))
 
   def version = Citrine::Native::VERSION
 
@@ -48,7 +48,7 @@ class ReleaseMetadataTest < Minitest::Test
 
   def test_gemspec_metadata_is_consistent
     spec = gemspec
-    assert_equal "citrine-native", spec.name
+    assert_equal "citrine-native-libui", spec.name
     assert_equal version, spec.version.to_s, "gemspec 的 version 与 version.rb 不一致"
     assert_equal ["lib"], spec.require_paths
     assert_equal spec.homepage, spec.metadata["source_code_uri"]
@@ -79,7 +79,7 @@ class ReleaseMetadataTest < Minitest::Test
     skip "不在 git 仓库里（或文件未纳入版本控制）" if committed_version.empty? || committed_lock.empty?
 
     version_in_head = committed_version[/VERSION\s*=\s*"([^"]+)"/, 1]
-    recorded = committed_lock.scan(/^    citrine-native \(([^)]+)\)$/).flatten.uniq
+    recorded = committed_lock.scan(/^    citrine-native-libui \(([^)]+)\)$/).flatten.uniq
 
     refute_nil version_in_head, "HEAD 的 version.rb 里读不到 VERSION"
     refute_empty recorded, "HEAD 的 Gemfile.lock 里找不到自身版本记录"

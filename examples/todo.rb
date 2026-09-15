@@ -12,7 +12,7 @@
 # - 原生 input 没有 placeholder → 用相邻 label 说明
 
 begin
-  require "citrine-native"
+  require "citrine-native-libui"
 rescue LoadError
   require_relative "../lib/citrine-native"
 end
