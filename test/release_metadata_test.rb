@@ -107,10 +107,14 @@ class ReleaseMetadataTest < Minitest::Test
     refute_empty ci_versions, "ci.yml 的 matrix 里没声明 ruby 版本"
 
     release = YAML.safe_load(read(".github/workflows/release.yml"))
-    release_version = release.dig("jobs", "gem", "steps").filter_map { |step| step["with"] && step["with"]["ruby-version"] }
-    refute_empty release_version, "release.yml 里没声明 ruby-version"
+    # 发布工作流拆成 gate + gem 两个 job，两处 setup-ruby 的 ruby-version 都要对拍
+    release_versions = %w[gate gem].flat_map do |job|
+      steps = release.dig("jobs", job, "steps") || []
+      steps.filter_map { |step| step.dig("with", "ruby-version") }
+    end
+    refute_empty release_versions, "release.yml 里没声明 ruby-version"
 
-    (ci_versions + release_version).each do |raw|
+    (ci_versions + release_versions).each do |raw|
       value = raw.to_s
       assert requirement.satisfied_by?(Gem::Version.new(value)),
              "工作流用的 Ruby #{value} 不满足 gemspec.required_ruby_version（#{requirement}）"
@@ -119,30 +123,37 @@ class ReleaseMetadataTest < Minitest::Test
 
   def test_release_workflow_has_trusted_publishing_preconditions
     release = YAML.safe_load(read(".github/workflows/release.yml"))
-    job = release.dig("jobs", "gem")
+    gem_job = release.dig("jobs", "gem")
 
     # YAML 1.1 把裸 `on` 解析成布尔 true——两条键都试
     trigger = release["on"] || release[true]
     assert_equal ["v*"], trigger&.dig("push", "tags"),
                  "发布工作流必须只由 v* 标签触发"
-    assert_equal "write", job.dig("permissions", "id-token"),
+    assert_equal "write", gem_job.dig("permissions", "id-token"),
                  "Trusted Publishing（OIDC）需要 id-token: write"
-    assert_equal "write", job.dig("permissions", "contents"),
+    assert_equal "write", gem_job.dig("permissions", "contents"),
                  "要往 GitHub Release 附产物就需要 contents: write"
 
-    # 门禁与构建：先跑测试，再构建，最后才 push（顺序错了会把没测过的 gem 发出去）
-    names = job["steps"].map { |step| step["name"].to_s }
-    gate = names.index { |name| name.include?("门禁") }
+    # 门禁与发布拆成两个 job：发布必须等门禁全绿（needs），且门禁 job 真的跑 rake
+    # （发布错版本的防线前移到"没测过的树不发"）
+    assert_includes Array(gem_job["needs"]), "gate",
+                    "发布 job 必须依赖门禁 job（needs: gate）"
+    gate_names = (release.dig("jobs", "gate", "steps") || []).map { |step| step["name"].to_s }
+    assert gate_names.any? { |name| name.include?("门禁") },
+           "gate job 里找不到发布门禁步骤"
+
+    # 先构建，最后才 push（顺序错了会把没测过的 gem 发出去）
+    names = gem_job["steps"].map { |step| step["name"].to_s }
     build = names.index { |name| name.include?("构建 gem") }
     push = names.index { |name| name.include?("发布到 RubyGems") }
-    refute_nil gate
     refute_nil build
     refute_nil push
-    assert_operator gate, :<, build, "门禁必须在构建之前"
     assert_operator build, :<, push, "构建必须在发布之前"
 
-    # 标签与 VERSION 的一致性校验必须存在（发布错版本的防线）
-    assert(names.any? { |name| name.include?("校验标签") }, "缺少标签与 VERSION 一致性校验步骤")
+    # 标签与 VERSION 的一致性校验必须存在，且在构建之前（发布错版本的防线）
+    tag_check = names.index { |name| name.include?("校验标签") }
+    refute_nil tag_check, "缺少标签与 VERSION 一致性校验步骤"
+    assert_operator tag_check, :<, build, "标签一致性校验必须在构建之前"
   end
 
   def test_releasing_doc_exists

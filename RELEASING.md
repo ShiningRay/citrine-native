@@ -34,12 +34,15 @@ git commit -am "Release 0.1.0" && git push origin main
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-推完在 Actions 里看 `Release` 工作流，它按顺序做四件事：
+推完在 Actions 里看 `Release` 工作流，它拆成两个 job、按顺序做四件事
+（为什么拆 job 见 release.yml 头部注释：门禁要同级 citrine 的 path 依赖、发布要仓库在
+workspace 根，两个诉求挤在一个 job 里做不到）：
 
-1. **门禁**：`bundle exec rake`（与 CI 同一套：桩测 + 不开窗的真控件冒烟）
+1. **门禁（gate job，macOS + Windows 矩阵，与 CI 同）**：`bundle exec rake`
+   （桩测 + 不开窗的真控件冒烟）——任何一台红了就没有下一步
 2. **校验标签与 VERSION 一致**（不一致直接失败，不会发出错误版本）
 3. **构建**：`gem build citrine-native.gemspec`
-4. **发布**：附产物到 GitHub Release → 用 OIDC 发布到 RubyGems
+4. **发布**：附产物到 GitHub Release → OIDC 换 RubyGems 凭据 → `gem push`
 
 ## 三、发布后验证（与 §二 同等重要）
 
