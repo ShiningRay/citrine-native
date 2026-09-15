@@ -13,7 +13,7 @@
 | **N2** | Todo 示例完整可玩（增删、勾选、回车提交） | **本机真窗口实测**（可复跑：`DEMO=todo bundle exec rake demo_acceptance`，13 项）：添加后 `待办：剩余 1 / 共 1` + 行内标签 `milk` + `删除` 按钮（提示切到"勾选表示完成"）；勾选后 `剩余 0 / 共 1`；删除后回 `共 0` + 空态提示。**输入框**：逐字符 `WM_CHAR`（用户打字的同一条路）→ `EN_CHANGE → on_change → draft`，**行真的被加进去**才算验通。⚠️ **更正**：本行早先记的"`WM_SETTEXT` 注入 → 应用内读回 `milk` 且 `on_change` 收到 `milk`"不成立——`SetWindowTextW` 只改 Edit 的内容（跨进程读回来的就是它，看着像成功），应用侧 `draft` 仍空、`add` 早退、计数停在 `共 0`；脚本化时被这 13 项断言抓出来。**回车提交不成立**（libui 的 entry 不暴露按键）——已改成按钮提交，属立项时的既定结论 | ✅（回车缺口已记录） |
 | **N3** | CRuby 单测覆盖 Renderer 语义（桩后端，CI 无需真窗口） | `bundle exec rake` = 162 runs / 670 assertions / 0 failures（N3 完成时的数；现为 **169 / 712**）；对齐清单见 `semantics-coverage.md`（主仓 16 条逐条给出承担方，本轮补 7 条断言） | ✅ |
 | **N4** | 对照主仓元素/事件词表出支持矩阵，未支持项全部有 dev_mode 提醒 | `element-event-matrix.md`（18 个元素标签 × 23 个事件词条逐个给处置）+ `test/element_event_matrix_test.rb`（8 项机器校验：未支持元素必须有替代建议、未支持事件必须在文档里出现）+ 7 条缺失的元素替代建议已补 | ✅ |
-| **N5** | 移植一个真实应用；gem 0.1.0 发布（Trusted Publishing） | dogfooding：citrine-sheets 与 citrine-market-terminal 的原生版都在本机跑通（见下）；发布准备：版本 0.1.0 / CHANGELOG / `release.yml`（OIDC + 标签一致性校验）/ gemspec 元数据 / 名称未被占用 / `gem build` + `gem unpack` 可加载 | 🟡 待打标签（需先注册 Trusted Publisher） |
+| **N5** | 移植一个真实应用；gem 0.1.0 发布（Trusted Publishing） | dogfooding：citrine-sheets 与 citrine-market-terminal 的原生版都在本机跑通（见下）；**0.1.0 已发布（2026-09-15）**：`v0.1.0` 标签触发 [Release 工作流](../../../.github/workflows/release.yml)（gate 矩阵 + gem 两 job）**全绿**——门禁（macos-latest + windows-latest 跑 `bundle exec rake`）→ 标签一致性校验 → `gem build` → 附产物到 GitHub Release → OIDC 换凭据 → `gem push`；**rubygems.org 已上架**（API 返回 0.1.0：依赖 base64 ≥ 0.2 / citrine ≥ 0.2 / libui ≥ 0.1、changelog/source 元数据齐全），GitHub Release 附 `citrine-native-0.1.0.gem`；发布后验证：curl 下载的**发布产物** `gem install --local` → 解析器自动补上 citrine 0.2.0 → 仓库外 require（LOADED_FROM 指向装好的那份）→ 桩渲染点击 3 次 `计数：3`。**首发红了两轮的复盘**：① 门禁跑在 ubuntu——libui 的 GTK 后端无显示服务器时 C 层 abort，rescue 拦不住（修：门禁挪 macOS + 冒烟脚本预判无显示器的 Linux）；② `rubygems/release-gem` 的 git 步骤固定在 workspace 根跑，而门禁要同级 citrine 的 path 依赖（修：拆 gate + gem 两 job，gem job 用 release-gem 内部同款 OIDC 凭据动作 + `gem push`）；对拍测试同步加强（needs: gate / 两 job 的 Ruby 版本 / 校验先于构建），两次红灯各加 3 条断言 | ✅ |
 
 ## 二、平台与集成（本机 Windows 实测）
 
@@ -39,8 +39,8 @@
 |---|---|---|
 | **真 OS 键盘注入** | 合成输入的边界（本轮三次实测划清）：① `SetWindowTextW` 到 Edit——**只改控件内容**，应用侧 `on_change` 不来（"看起来成功"的假象，见 N2 行的更正）；② 逐字符 `WM_CHAR` 到 Edit——**成功**，走的是用户打字的同一条路（todo 的 4 条断言靠它）；③ 但到 **area** 就不行：`SendMessage(WM_KEYDOWN/WM_KEYUP)` 直投 area 句柄、以及 `AttachThreadInput` + `SetFocus(area)`（已确认 `GetFocus() == area`）后再投，两条路都投不动——sheets 的选区仍停在点击选中的 `D15`。SendKeys 本身在本环境也不可靠（前台窗口被宿主抢走） | 键盘到**原生 Edit** 已验证；键盘到**自绘 area** 仍需人手点一遍（两个 demo 的键盘路径在发布前人工过一遍） |
 | **macOS 侧的 chart 重构** | chart 文字并入自绘面板后改变了 macOS 布局（走势图更高），本机无 macOS | 下次在 macOS 上复跑 `native:smoke` |
-| **CI / Release 工作流首跑** | 本机无法执行 GitHub Actions；YAML 已本地解析校验、命令已按同序列本地跑过 | 首次 push 后看 CI；发布前先在 GitHub 上跑一次 release（dry run 或直接打标签） |
-| **消费端 `gem install citrine-native`** | 本机访问 rubygems.org 的元数据/下载不稳定（`gem search --remote` 无输出、`gem install <file>` 挂起） | 网络正常时或发布后验证 |
+| **CI / Release 工作流首跑** | ~~本机无法执行 GitHub Actions~~ → **2026-09-15 已完成**：CI 首跑 `macos-latest + windows-latest` 全绿；Release 工作流首跑红了两轮（复盘见 §一 N5 行），修复后 `v0.1.0` 第三推全绿并真实发布 | 工作流在 GitHub 上真的能跑通——已证明 |
+| **消费端 `gem install citrine-native`**（直连索引解析） | 本机两条路都不通，且都不是发布的问题：① 默认源是阿里云镜像，发布后同步有延迟（已确认上线 20 分钟内未同步）；② 直连 rubygems.org 时 Ruby 的索引下载（`specs.4.8.gz`）撞上本机 **IPv6 黑洞**（无 v6 路由，Ruby 顺序尝试卡死；curl 有 happy-eyeballs 能回退） | 已分块证明：rubygems.org API 元数据正确、.gem 可直接下载（curl）、**下载的发布产物装进本机后解析器自动补齐 citrine 0.2.0、require 与渲染全过**（LOADED_FROM 指向装好的那份）。下次网络/镜像就绪时补跑一次完整 `gem install` 即可闭环 |
 | **sheets 的 ⌘B 只能加粗不能取消** | 浏览器侧共享逻辑缺陷（读不存在的 `@active_row/@active_col`），改它会改浏览器行为 | 需单独决策（demos-native.md 的"待用户决定"） |
 
 ## 四、本机验证方法论（可复现）

@@ -25,7 +25,8 @@
   18 个核心元素标签与 23 个事件词条的处置（支持 / 报错 / 提醒），机器校验在
   `test/element_event_matrix_test.rb`
 - [plan/acceptance-0.1.0.md](plan/acceptance-0.1.0.md) —— **0.1.0 验收证据**（N0–N5 逐条口径 ↔
-  证据；含"未验证/边界"清单与 Windows 无视觉模型时的验证方法论）
+  证据；含"未验证/边界"清单与 Windows 无视觉模型时的验证方法论）。
+  **N0–N5 全部 ✅**：0.1.0 已于 2026-09-15 发布到 rubygems.org（Trusted Publishing）
 - [plan/analysis/demos-native.md](plan/analysis/demos-native.md) —— 让 citrine-sheets 与
   citrine-market-terminal 跑在原生窗口的交付分析
 - 任务：NA-1（框架能力）、SHEETS-1 / MARKET-1（两个 demo 的移植）、NA-2 / SHEETS-2 / MARKET-2（独立验收）
