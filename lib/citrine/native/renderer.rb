@@ -21,11 +21,9 @@ module Citrine
       ELEMENTS = { box: :box, label: :label, button: :button,
                    text_input: :entry, check_box: :checkbox, area: :area }.freeze
 
-      # v0 落地的样式键（GOALS 4.5；flex_grow 是 N1 新增的映射，见变更日志）
-      STYLE_KEYS = %i[gap flex_grow].freeze
-
-      # 基类给 box 合成的样式键（不是用户声明，提醒时要排除）
-      SYNTHETIC_BOX_STYLE_KEYS = %i[display flex_direction].freeze
+      # 样式键的落点登记在 StyleMatrix（docs/design/style-matrix.md 是同一份表的散文版）：
+      # 本类只实现 :mapped 的落地（apply_padding / stretchy?）与 :painted 里 area 的
+      # 视觉底板（paint_area_style），其余由 warn_unsupported_style 按矩阵提醒。
 
       # 每个元素支持的事件 prop（其余 on_* 在 dev_mode 下提醒）
       SUPPORTED_EVENTS = {
@@ -46,14 +44,24 @@ module Citrine
       CONSUMED_PROPS = { area: %i[size scroll watch].freeze }.freeze
       NO_CONSUMED_PROPS = [].freeze
 
-      # 未支持元素/属性的替代建议（报错与提醒里带上，别让用户自己猜）
+      # 未支持元素/属性的替代建议（报错与提醒里带上，别让用户自己猜）。
+      # 覆盖度由 test/element_event_matrix_test.rb 锁住：核心元素词表
+      # （Citrine::Component::ELEMENT_TAGS）里每个不在 ELEMENTS 的标签都必须在这里有条目，
+      # 否则用户拿到的是一个没有出路的报错。
       ELEMENT_HINTS = {
         textarea: "多行输入对应 libui 的 uiNewMultilineEntry，v0 未接（见 GOALS Roadmap N4）",
         select: "下拉选择对应 uiNewCombobox/uiNewRadioButtons，v0 未接（见 GOALS Roadmap N4）",
+        option: "选项属于下拉选择（select）：uiNewCombobox 的条目在创建时定死，v0 未接",
         table: "表格对应 uiNewTable，能力有限，v0 未接（见 GOALS Roadmap N4）",
+        thead: "表头属于表格：原生没有表格分区，整张表请用 element(:area, on_draw: …) 自绘",
+        tbody: "表体属于表格：同上，整张表自绘（Painter 画网格与单元格）",
+        tr: "表格行属于表格：同上，自绘（Painter 里按行距铺）",
+        td: "表格单元格属于表格：同上，自绘（参考 citrine-market-terminal 的表格画法）",
+        th: "表头单元格属于表格：同上，自绘",
         img: "原生控件没有图片元素，可用 element(:area, on_draw: …) 自绘",
         a: "原生控件没有超链接，改用 button + on_click",
         ul: "列表请用 stack { } + label { } 组合",
+        ol: "有序列表同 ul：stack { } + label { }，序号写在文案里",
         li: "列表项请用 label { }",
         form: "表单请用 stack { } 组合",
         span: "行内文本请并入相邻 label 的字符串",
@@ -82,6 +90,7 @@ module Citrine
 
       # element 语义重定义为窗口描述：创建窗口 + 根容器（GOALS 4.2）
       def setup_root(root, element)
+        @tree_root = root # 挂载期提醒要遍历整棵树（见 warn_strict_stretch_chain）
         options = element || {}
         @window = @widgets.create_window(
           title: options.fetch(:title, "Citrine"),
@@ -199,7 +208,10 @@ module Citrine
       # （与 canvas 后端"最外层 settle 才重绘"同思路）。
 
       def finalize(_node)
-        repaint_areas if @parents.empty?
+        return unless @parents.empty?
+
+        repaint_areas
+        warn_strict_stretch_chain
       end
 
       # 块级重建（信号驱动）也发生在最外层 Effect 里：收尾补一次兜底重绘
@@ -243,6 +255,7 @@ module Citrine
       # 已归一键名的键盘事件 Hash），这里变成 Citrine 的事件视图交给组件。
       def bind_area_events(node)
         @widgets.on_area_draw(node.dom) do |painter|
+          paint_area_style(node, painter)
           handler = node.props[:on_draw]
           node.owner.handle_event(handler, painter) if handler
           # 绘制期的提醒（颜色写错、align 缺 width…）按 dev_mode 去重输出：画一次说一次
@@ -251,6 +264,89 @@ module Citrine
         end
         @widgets.on_area_pointer(node.dom) { |event| dispatch_pointer(node, event) }
         @widgets.on_area_key(node.dom) { |event| dispatch_area_key(node, event) }
+      end
+
+      # ── 面板的视觉底板（L2：样式的 :painted 组里 area 自动消费的那几个键）──────
+      #
+      # 应用给 area 写 style: { background: …, border: …, border_radius: … } 时，框架在
+      # **on_draw 之前**画一次底板，应用只管内容——两个 demo 里手写的
+      # `painter.rect(0, 0, w, h, fill: Theme::PANEL, stroke: Theme::LINE)` 由此收进框架。
+      #
+      # 每帧现读 node.props[:style]（经 resolve_style）：样式是 Proc 时也跟着重画，
+      # 与响应式属性同口径。原生控件没有这项能力（libui 的 box/label 无法着色），
+      # 所以非 area 元素上的这些键仍由 warn_unsupported_style 提醒。
+      def paint_area_style(node, painter)
+        style = resolve_style(node)
+        fill = style[:background]
+        width, stroke = border_of(style)
+        radius = style[:border_radius]
+
+        fill = :none if fill.nil?
+        stroke = :none if stroke.nil?
+        return if fill == :none && stroke == :none && radius.nil?
+
+        painter.rect(0, 0, painter.width, painter.height,
+                     fill: fill, stroke: stroke,
+                     line_width: width || 1, radius: radius || 0)
+      end
+
+      # border 的三种写法（够用即止，不做 CSS 解析器）：
+      #   border: "1px solid #1e2c48"   简写（只画实线，dashed/dotted 提醒后按实线）
+      #   border: "#1e2c48"             只有颜色 → 1px
+      #   border: { width: 2, color: … } 或 border_color / border_width 分开写
+      def border_of(style)
+        width = positive_number(style[:border_width])
+        color = normalize_border_color(style[:border_color])
+        shorthand = style[:border]
+
+        case shorthand
+        when Hash
+          width ||= positive_number(shorthand[:width])
+          color ||= normalize_border_color(shorthand[:color])
+        when String
+          width, color = parse_border_shorthand(shorthand, width, color)
+        end
+
+        return [nil, nil] if color.nil?
+
+        [width || 1.0, color]
+      end
+
+      def parse_border_shorthand(text, width, color)
+        stripped = text.strip
+        return [width, color] if stripped.empty? || stripped == "none"
+
+        if (match = /\A(\d+(?:\.\d+)?)px\b(.*)\z/.match(stripped))
+          width ||= match[1].to_f
+          rest = match[2]
+          warn_dashed_border(rest)
+          color ||= normalize_border_color(rest.sub(/\A\s*(solid|dashed|dotted)\b/, "").strip)
+        else
+          color ||= normalize_border_color(stripped) # 只有颜色
+        end
+        [width, color]
+      end
+
+      def warn_dashed_border(rest)
+        return unless Citrine.dev_mode?
+        return unless rest.match?(/\b(dashed|dotted)\b/)
+
+        warn_once(:border_style, "[citrine-native] border 只画实线（solid）：dashed / dotted " \
+                                 "没有对应，按实线画（见 docs/design/style-matrix.md）")
+      end
+
+      def normalize_border_color(value)
+        return nil if value.nil?
+
+        text = value.to_s.strip
+        return nil if text.empty? || text == "none" || value == :none
+
+        value
+      end
+
+      def positive_number(value)
+        number = value.to_f
+        number.positive? ? number : nil
       end
 
       # 指针事件归一：适配层给 :down/:up/:move，这里映射成 PointerEvent 的
@@ -425,6 +521,58 @@ module Citrine
         "#{size[0]}×#{size[1]}"
       end
 
+      # ── 挂载期的"严格后端上会塌"提醒（backlog F24；判据同 F11 / §5.7.2）──────
+      #
+      # 为什么另开一条（draw 期的 warn_starved_area 不够）：Windows 的 libui 对
+      # stretchy 链断开的 area 是**完全**的 0×0，`WM_PAINT` 不会来 → Draw 不跑 →
+      # 那条提醒永远不会亮（macOS 上 0×0 面板仍有 Draw，所以只在 Windows 上看得见）。
+      # 这里做的是**静态判据**（不看几何、不求几何）：面板自己能 stretchy，且从组件根
+      # 往下的每一层 box 在各自父容器里都 stretchy，逐层成立才能真正拿到剩余空间。
+      # 因此措辞说"在严格后端上会塌"，不假装量到了尺寸；只在 dev_mode 下提醒、按节点去重。
+      def warn_strict_stretch_chain
+        return unless Citrine.dev_mode?
+        return unless @tree_root
+
+        @tree_root.children.each { |child| check_stretch_chain(child, true, nil, 1) }
+      end
+
+      # chain_ready：从组件根到这里的 box 链是否**每层**都 stretchy
+      # breaker / depth：第一个断掉的 box（`[节点, 层号]`，层号从组件根数起、1 基）——
+      # 用于把"链在哪断了"说清楚，而不是让应用自己去猜哪一层
+      def check_stretch_chain(node, chain_ready, breaker, depth)
+        case node.type
+        when :area
+          return if chain_ready && stretchy?(node)
+
+          warn_once([:area_strict_chain, node.object_id], strict_chain_message(breaker))
+        when :box
+          if chain_ready && !stretchy?(node)
+            chain_ready = false
+            breaker ||= [node, depth]
+          end
+          node.children.each { |child| check_stretch_chain(child, chain_ready, breaker, depth + 1) }
+        else
+          # 透明容器（fragment / portal / suspense）不占控件层，层号不加
+          (node.children || []).each { |child| check_stretch_chain(child, chain_ready, breaker, depth) }
+        end
+      end
+
+      def strict_chain_message(breaker)
+        where = if breaker.nil?
+                  "**面板自己**没有 stretchy 尺寸（style: { flex_grow: 1 }）"
+                else
+                  node, depth = breaker
+                  "**祖先里第 #{depth} 层那个 #{node.type}** 没有 stretchy 尺寸（style: { flex_grow: 1 }）"
+                end
+        "[citrine-native] 这个面板撑不开：#{where}。\n" \
+          "  为什么现在才知道：严格后端（Windows）下它会是 0×0 且**一次都不绘制**，" \
+          "绘制期的\"面板被压扁\"提醒因此永远不会亮；macOS 对窗口直系子元素宽容，" \
+          "同一棵树在那里可能看不出问题（跨平台差异见 docs/design/platform-matrix.md）。\n" \
+          "  修法：从组件根到面板，**参与拉伸的每一层 box** 都要自己声明 `style: { flex_grow: 1 }`，" \
+          "逐层成立才撑得开（`flex_grow` 是布尔不是权重；判据与反例见 docs/design/native-area.md §5.7.2）。\n" \
+          "  这个提醒只在 dev_mode 下出现（`dev_mode: false` 可关）。"
+      end
+
       # ref: :grid → refs[:grid] 拿到的是**面板句柄**（AreaHandle，设计 2.5），不是 libui 裸指针
       def register_ref(node)
         return super unless node.type == :area
@@ -567,24 +715,33 @@ module Citrine
         direction == :column ? :column : :row
       end
 
-      # 追加时的 stretchy ← 静态 flex_grow（flex-grow 的语义就是"吃掉剩余空间"，
+      # 追加时的 stretchy ← 静态 flex_grow / flex（flex-grow 的语义就是"吃掉剩余空间"，
       # 与 libui box 的 stretchy 同构）。响应式样式不参与：那会在挂载期读到信号、
-      # 把订阅落到外层块上（正是 G-2 要消除的隐性外扩）
+      # 把订阅落到外层块上（正是 G-2 要消除的隐性外扩）。键的登记见 StyleMatrix。
       def stretchy?(node)
         style = node.props[:style]
         return false if style.is_a?(Proc)
 
-        Style.normalize(style)[:flex_grow].to_f.positive?
+        normalized = Style.normalize(style)
+        return true if normalized[:flex_grow].to_f.positive?
+
+        # CSS 的 flex 简写："1" / "1 1 auto" / "0 1 auto"——取首段数值
+        flex = normalized[:flex].to_s.strip
+        flex.match?(/\A\d/) && flex.to_f.positive?
       end
 
+      # 容器内边距 ← gap / padding*（StyleMatrix 的 :mapped 组）。
+      # libui 的 box 只有 padded 开关，所以数值按是否 > 0 判定
       def apply_padding(node)
-        gap = resolve_style(node)[:gap]
-        return if gap.nil? # 未声明 gap → 不动容器默认值
+        style = resolve_style(node)
+        candidates = [style[:padding], style[:padding_top], style[:padding_right],
+                      style[:padding_bottom], style[:padding_left], style[:gap]].compact
+        return if candidates.empty? # 一个都没声明 → 不动容器默认值
 
-        @widgets.set_padding(node.dom, spacing?(gap))
+        @widgets.set_padding(node.dom, candidates.any? { |value| spacing?(value) })
       end
 
-      # gap 只有"有间距/无间距"两档可映射（libui 的 box 只有 padded 开关）；
+      # gap / padding 只有"有间距/无间距"两档可映射（libui 的 box 只有 padded 开关）；
       # 数值按是否 > 0 判定，非数值（主题 token 等）视为"有间距"
       def spacing?(gap)
         value = gap.to_s
@@ -600,26 +757,50 @@ module Citrine
         @widgets.set_enabled(node.dom, !node.props[:disabled])
       end
 
+      # 样式键的提醒按 StyleMatrix 的三档状态说话（绝不静默丢弃；GOALS 4.5）：
+      #   :mapped  静音（由 stretchy? / apply_padding 落地）
+      #   :painted area 上的视觉底板静音（L2 会自动画）；其余说清"怎么自绘"
+      #   :ignored 说清"没有对应概念 + 为什么"
       def warn_unsupported_style(node)
         return unless Citrine.dev_mode?
 
-        declared = declared_style_keys(node)
         resolve_style(node).each_key do |key|
-          next if STYLE_KEYS.include?(key)
-          # 基类给 box 合成的 display/flex_direction 不是用户声明，别拿来提醒
-          next if node.type == :box && SYNTHETIC_BOX_STYLE_KEYS.include?(key) && !declared.include?(key)
+          next if StyleMatrix.status(key) == StyleMatrix::MAPPED
+          next if node.type == :area && StyleMatrix.entry(key).area?
 
-          warn_once([:style, key], "[citrine-native] 样式键 #{key.inspect} 在原生后端不支持" \
-                                   "（libui 没有 CSS，v0 只映射 #{STYLE_KEYS.map(&:inspect).join(' / ')}），已忽略")
+          warn_once([:style, key], style_warning(key, node))
+        end
+
+        warn_non_flex_display(node)
+      end
+
+      def style_warning(key, node)
+        entry = StyleMatrix.entry(key)
+        if entry.status == StyleMatrix::PAINTED
+          if entry.area?
+            "[citrine-native] 样式键 #{key.inspect} 不能映射到 #{node.type}（原生控件无法着色）：" \
+              "把它移到 element(:area) 上（自绘面板会把它画成底板），或在 on_draw 里自绘。" \
+              "见 docs/design/style-matrix.md"
+          else
+            "[citrine-native] 样式键 #{key.inspect} 在原生后端不支持自动映射（需要自绘）：" \
+              "在 element(:area) 的 on_draw 里用 #{entry.mapping}。见 docs/design/style-matrix.md"
+          end
+        else
+          "#{"[citrine-native] 样式键 #{key.inspect} 在原生后端没有对应概念（libui 无 CSS），已忽略"}" \
+            "#{StyleMatrix.registered?(key) ? "（#{entry.note}）" : "（未在矩阵中登记）"}。" \
+            "见 docs/design/style-matrix.md"
         end
       end
 
-      # 用户显式声明的样式键（只有静态 Hash 能静态枚举；Proc 样式的键在求值前无从得知）
-      def declared_style_keys(node)
-        style = node.props[:style]
-        return [] unless style.is_a?(Hash)
+      # display 只有 flex 有对应：基类给 box 合成的 display: "flex" 静音，
+      # 用户显式写的 grid 等值要提醒（否则"以为布局生效了"）
+      def warn_non_flex_display(node)
+        display = resolve_style(node)[:display]
+        return if display.nil? || display.to_s == "flex"
 
-        Style.normalize(style).keys
+        warn_once([:style, :display_value],
+                  "[citrine-native] display: #{display.inspect} 在原生后端没有对应概念" \
+                  "（只支持 flex 布局，stack / row 就是它的两种方向）。见 docs/design/style-matrix.md")
       end
 
       def warn_unsupported_props(node)

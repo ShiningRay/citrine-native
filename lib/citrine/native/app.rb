@@ -22,23 +22,53 @@ module Citrine
       DEFAULT_OPTIONS = { title: "Citrine", width: 640, height: 480, margined: true,
                           activate: true }.freeze
 
+      # 优雅退出用的信号集合（launcher 传 `signals: :default` 时用这一组）。
+      # 为什么是这几个：`run` 把 teardown 放在 ensure 里，而 Ruby 对**未捕获**的终止
+      # 信号是直接终止进程、不跑 ensure——libui 的控件销毁记账就整个跳过了（见
+      # docs/design/platform-matrix.md 第三节）。实际安装时会按 `Signal.list` 过滤：
+      # Windows 没有 HUP/QUIT/ALRM，`trap` 会直接 ArgumentError。
+      DEFAULT_QUIT_SIGNALS = %w[INT TERM HUP QUIT ALRM].freeze
+
       attr_reader :component, :options, :widgets, :renderer, :window, :root
 
-      def initialize(component, widgets: nil, **options)
+      def initialize(component, widgets: nil, signals: nil, **options)
         @component = component.is_a?(Class) ? component.new : component
         @options = DEFAULT_OPTIONS.merge(options)
         @widgets = widgets || Widgets.default
         @renderer = Renderer.new(widgets: @widgets)
+        @signals = signals
         @torn_down = false
       end
 
       # 建窗口 + 挂载组件 + 进主循环（阻塞到窗口关闭）
       def run
         setup
+        trap_quit!(signals: @signals) if @signals
         @widgets.main_loop
         self
       ensure
         teardown
+      end
+
+      # 装"收到终止信号就退出主循环"的处理器：退出后仍走 `run` 的 ensure → 有序拆解。
+      # 只在本平台**实际存在**的信号上装（按 `Signal.list` 过滤），返回真正装上的名字，
+      # 便于启动器记日志或断言。
+      #
+      # 为什么不在 `run` 里默认装：`trap` 是**进程级**的，会覆盖宿主已有的处理器——
+      # 库不该悄悄接管宿主的信号策略（被嵌入时尤其如此）。应用把自己当独立进程
+      # （脚本即应用）时传 `signals: :default` 即可，例如：
+      #
+      #   Citrine::Native.run(MyApp, signals: :default, title: "我的应用")
+      #   # 或自管主循环：
+      #   app = Citrine::Native.start(MyApp, title: "我的应用")
+      #   app.trap_quit!   # 或 trap_quit!(signals: %w[INT TERM])
+      #   app.widgets.main_loop
+      #   app.teardown
+      def trap_quit!(signals: DEFAULT_QUIT_SIGNALS)
+        names = (signals == :default ? DEFAULT_QUIT_SIGNALS : Array(signals)).map(&:to_s)
+        registered = names.select { |name| ::Signal.list.key?(name) }
+        registered.each { |name| trap(name) { quit } }
+        registered
       end
 
       # 非阻塞的前半程（测试与"自己管主循环"的场景用）

@@ -430,6 +430,10 @@ module Citrine
         def destroyed_widgets = @created.select(&:destroyed?)
 
         # 测试用：在子树里按种类找控件
+        # 测试用：在子树里按种类找控件。
+        # ⚠️ 两个方法都**必须传句柄**（子树根，通常是 `container` 或某个 box 句柄）——
+        # 桩后端没有"全局控件表"可查，句柄是唯一入口（backlog F6）。便捷写法：
+        # NativeTest 的 `find(kind:)` / `find_all(kind:)` 已经带上了 `container`。
         def find(handle, kind: nil, text: nil)
           return handle if matches?(handle, kind, text)
 

@@ -35,6 +35,7 @@ module Citrine
 end
 
 require_relative "native/version"
+require_relative "native/style_matrix"
 require_relative "native/pointer_event"
 require_relative "native/painter"
 require_relative "native/area_handle"
@@ -69,6 +70,10 @@ module Citrine
       # dev_mode 默认开：原生运行时没有构建管线（脚本即应用），开发期提醒
       # （未支持的样式键/属性、未声明方向的 box）应当直接可见；显式传
       # dev_mode: false 可关掉，传 nil 则保留调用方此前的设置。
+      #
+      # signals 默认 nil（不接管进程级信号）：库不该悄悄覆盖宿主已有的处理器。
+      # 把运行脚本当独立进程时传 `signals: :default`，Ctrl+C / SIGTERM 就会走
+      # "退出主循环 → 有序拆解"，而不是硬杀（见 App#trap_quit!）。
       def run(component, dev_mode: true, widgets: nil, **options)
         Citrine.dev_mode = dev_mode unless dev_mode.nil?
         App.new(component, widgets: widgets, **options).run
