@@ -32,6 +32,7 @@ class AreaTest < NativeTest
                        on_mouse_down: ->(event) { note(:down, event) },
                        on_mouse_up: ->(event) { note(:up, event) },
                        on_mouse_move: ->(event) { note(:move, event) },
+                       on_wheel: ->(event) { note(:wheel, event) },
                        on_key: { "ArrowUp" => :arrow_key, "Enter" => :enter_key, else: :other_key })
       end
     end
@@ -45,6 +46,17 @@ class AreaTest < NativeTest
     def arrow_key(event) = note(:key_arrow, event)
     def enter_key(event) = note(:key_enter, event)
     def other_key(event) = note(:key_other, event)
+  end
+
+  # 滚轮载荷与 beryl L1 的 on_wheel 同口径：{delta_x:, delta_y:, modifiers:}
+  def test_area_on_wheel_receives_delta_payload
+    mount_panel
+
+    backend.fire_wheel(panel, 0.0, -2.0, modifiers: { shift: true })
+
+    kind, event = log.last
+    assert_equal :wheel, kind
+    assert_equal({ delta_x: 0.0, delta_y: -2.0, modifiers: { shift: true } }, event)
   end
 
   def panel = find(kind: :area)
@@ -825,20 +837,14 @@ class AreaTest < NativeTest
     assert_empty err
   end
 
-  # 设计 2.1 v2 去掉了 on_wheel（libui 的 area 不带滚轮事件）→ 它按"未支持的事件 prop"
-  # 走既有提醒口径，而不是假装收到了
-  def test_on_wheel_is_reported_as_unsupported
+  # 设计 2.1 v3：on_wheel 回到核心事件面（载荷 {delta_x:, delta_y:, modifiers:}，
+  # 与 beryl L1 同口径）；后端能力按适配层声明——libui 的 area 不投递滚轮，
+  # 由其适配层 warn-once（见 citrine-native-libui），核心不再统一报"未支持"
+  def test_area_on_wheel_is_wired_without_unsupported_warning
     Citrine.dev_mode = true
-    klass = Class.new(Citrine::Component) do
-      def view
-        element(:area, on_draw: ->(panel) { panel.rect(0, 0, 1, 1, fill: "#fff") },
-                       on_wheel: ->(event) { event })
-      end
-    end
+    out, err = capture_io { mount_panel }
 
-    _out, err = capture_io { mount(klass) }
-
-    assert_match(/on_wheel 在原生后端不支持/, err)
+    refute_match(/on_wheel 在原生后端不支持/, err)
   end
 
   # ── 5b) 面板拿不到空间（P2.1 / SHEETS D2 的坑）──────────

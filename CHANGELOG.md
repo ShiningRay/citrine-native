@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## [Unreleased]
+
+### Added
+
+- **事件层错误边界 `Citrine::Native::EventGuard`**（统一契约）：应用的事件处理器
+  抛出的异常一律不抛回平台事件栈——Renderer 各 dispatch 入口（on_click / on_change /
+  on_enter / 指针三态 / click 合成 / on_draw / on_key / window_key 转发）统一包
+  guard，异常打 stderr（上下文 + 首 8 帧栈）后主循环继续。libui 的 `safe` 改为
+  委托同一实现（输出格式两后端同口径）；GTK 绘制订阅块同步接入。
+- `text_input` 的 `on_enter`（回车提交）进入核心事件面：接线先写回 Signal 再派发
+  （与 on_change 同口径）。能力按后端声明：GTK 绑 entry 的 `activate` ✅；
+  libui 的 entry 不暴露按键 → 适配层 warn-once 后忽略（跨后端应用不炸）。
+- `area` 的 `on_wheel` 回归核心事件面（设计 2.1 v3）：载荷 `{delta_x:, delta_y:,
+  modifiers:}`（beryl L1 同口径），不抑制平台默认滚动。GTK 后端走 `scroll-event`
+  归一并过滤滚轮键 4-7（修复滚轮伪装成 `mouse_down button=4/5` 混进指针事件）；
+  libui 的 uiArea 不投递滚轮 → 适配层 warn-once 后忽略。Widgets::Base 协议新增
+  `on_enter` / `on_area_wheel`（缺省 NotImplementedError，不支持的后端实现为
+  warn-once 空操作）；Memory 桩补 `fire_enter` / `fire_wheel` 触发助手。
+
 ## [0.2.0] - 2026-09-16
 
 ### Changed

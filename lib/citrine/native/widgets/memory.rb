@@ -268,6 +268,8 @@ module Citrine
           subscribe(control, control.kind == :checkbox ? :toggle : :change, &block)
         end
 
+        def on_enter(control, &block) = subscribe(control, :enter, &block)
+
         # ── 自绘面板（area）────────────────────────────────────
         # 桩后端不做真绘制：draw 交给 Painter::Recording（记录图元序列），
         # 指针/键盘事件由测试用 fire_* 合成（形状与 libui 后端一致）。
@@ -312,6 +314,7 @@ module Citrine
         def on_area_key(area, &block) = subscribe(area, :key, &block)
         def on_area_crossed(area, &block) = subscribe(area, :crossed, &block)
         def on_area_drag_broken(area, &block) = subscribe(area, :drag_broken, &block)
+        def on_area_wheel(area, &block) = subscribe(area, :wheel, &block)
 
         # 仅滚动面板（与 libui 后端同一口径：非滚动面板 fail fast，
         # libui 那边真调下去会终止进程）
@@ -380,6 +383,7 @@ module Citrine
         end
 
         # 点击 = 按下 + 抬起（渲染器负责配对成 "click"，与 libui 的 Down/Up 一致）
+
         def fire_click(area, x = 0, y = 0, button: 1, modifiers: {}, count: 1)
           fire_mouse_down(area, x, y, button: button, count: count, modifiers: modifiers)
           fire_mouse_up(area, x, y, button: button, modifiers: modifiers)
@@ -395,6 +399,18 @@ module Citrine
 
         def fire_mouse_move(area, x = 0, y = 0, button: 0, modifiers: {})
           fire_pointer(area, kind: :move, x: x, y: y, button: button, count: 0, modifiers: modifiers)
+        end
+
+        # 滚轮/回车：载荷形状与 GTK 归一后的口径一致（{delta_x:, delta_y:, modifiers:}）
+        def fire_wheel(area, delta_x = 0.0, delta_y = 1.0, modifiers: {})
+          ensure_live!(area, "滚轮事件")
+          dispatch_area(area, :wheel, delta_x: delta_x.to_f, delta_y: delta_y.to_f,
+                                      modifiers: modifiers)
+        end
+
+        def fire_enter(entry)
+          ensure_live!(entry, "回车事件")
+          dispatch_area(entry, :enter)
         end
 
         def fire_pointer(area, kind:, x: 0, y: 0, button: 1, count: 1, modifiers: {})

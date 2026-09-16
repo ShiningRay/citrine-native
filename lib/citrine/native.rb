@@ -37,6 +37,7 @@ module Citrine
 end
 
 require_relative "native/version"
+require_relative "native/event_guard"
 require_relative "native/style_matrix"
 require_relative "native/pointer_event"
 require_relative "native/painter"

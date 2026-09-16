@@ -584,6 +584,69 @@ class RendererTest < NativeTest
     assert_equal "reset", entry.value
   end
 
+  # on_enter：回车提交（DOM 侧 on_enter 的原生对应）。接线先写回 Signal 再派发，
+  # 处理器读到的是新值——与 on_change 同一口径
+  class EnterForm < Citrine::Component
+    state :draft, default: ""
+    state :entered, default: nil
+
+    def view
+      stack do
+        text_input(value: signal(:draft), on_enter: ->(_text) { self.entered = draft })
+        label { "entered=#{entered}" }
+      end
+    end
+  end
+
+  def test_text_input_on_enter_writes_back_and_fires
+    form = mount(EnterForm)
+    entry = find(kind: :entry)
+
+    entry.value = "提交内容"
+    backend.fire_enter(entry)
+
+    assert_equal "提交内容", form.draft
+    assert_equal "提交内容", form.entered
+    assert_equal ["entered=提交内容"], texts(kind: :label)
+  end
+
+  def test_text_input_without_on_enter_does_not_wire_activate
+    form = mount(Form)
+    entry = find(kind: :entry)
+
+    entry.value = "x"
+    assert_equal false, backend.fire_enter(entry)  # 没订阅就没有处理器可触发
+    assert_nil form.submitted
+  end
+
+  # 事件层错误边界（EventGuard）：处理器抛异常不带走主循环（libui/GTK 同口径）
+  class ExplodingButton < Citrine::Component
+    state :count, default: 0
+
+    def view
+      stack do
+        button(on_click: ->(_e) { raise "boom" })
+        label { "count=#{count}" }
+      end
+    end
+  end
+
+  def test_event_handler_exception_is_contained
+    subject = mount(ExplodingButton)
+    btn = find(kind: :button)
+
+    out, err = capture_io do
+      click(btn)
+    end
+
+    assert_match(/boom/, err)
+    assert_match(/on_click/, err)
+    # 主循环继续：控件树仍可查询，后续点击同样不抛
+    assert_equal ["count=0"], texts(kind: :label)
+    capture_io { click(btn) }
+    assert_equal ["count=0"], texts(kind: :label)
+  end
+
   def test_check_box_writes_toggle_back_to_signal
     form = mount(Form)
     checkbox = find(kind: :checkbox)

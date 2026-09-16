@@ -108,6 +108,12 @@ module Citrine
           raise NotImplementedError, "#{self.class}#on_change 未实现：本后端不支持变更事件"
         end
 
+        # 回车提交（能力按后端声明）：GTK 绑 entry 的 activate；不支持的后端
+        # 实现为 warn-once 的空操作（应用跨后端运行时不炸，见 Renderer#bind_events）
+        def on_enter(_control, &_block)
+          raise NotImplementedError, "#{self.class}#on_enter 未实现：本后端不支持回车提交"
+        end
+
         # ── 自绘面板（area，设计 2.1 / 2.3 / 2.5）──────────────
         # 面板把绘制与输入都交给应用：适配层只负责"建控件 → 装回调 → 把事件与
         # Painter 转交订阅者"，以及三个面板特有的操作（重绘/滚动/焦点）。
@@ -134,6 +140,12 @@ module Citrine
 
         def on_area_key(_area, &_block)
           raise NotImplementedError, "#{self.class}#on_area_key 未实现：本后端不支持自绘面板"
+        end
+
+        # 滚轮（能力按后端声明）：载荷 {delta_x:, delta_y:, modifiers:}（beryl L1 同口径）；
+        # 不支持的后端实现为 warn-once 空操作
+        def on_area_wheel(_area, &_block)
+          raise NotImplementedError, "#{self.class}#on_area_wheel 未实现：本后端不支持滚轮事件"
         end
 
         def on_area_crossed(_area, &_block)

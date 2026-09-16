@@ -26,10 +26,14 @@ module Citrine
       # 视觉底板（paint_area_style），其余由 warn_unsupported_style 按矩阵提醒。
 
       # 每个元素支持的事件 prop（其余 on_* 在 dev_mode 下提醒）
+      # on_enter：entry 的回车提交（DOM 侧 on_enter 的原生对应）。能力按后端
+      # 声明——GTK 绑 activate；libui 的 entry 不暴露按键，接线处 warn-once 后忽略。
+      # on_wheel：自绘面板的滚轮（载荷 {delta_x:, delta_y:, modifiers:}，与 beryl
+      # L1 同口径）。libui 的 uiArea 不投递滚轮（能力边界，见其 element-event-matrix）。
       SUPPORTED_EVENTS = {
         box: [].freeze, label: [].freeze, button: %i[on_click].freeze,
-        text_input: %i[on_change].freeze, check_box: %i[on_change].freeze,
-        area: %i[on_draw on_click on_mouse_down on_mouse_up on_mouse_move on_key].freeze
+        text_input: %i[on_change on_enter].freeze, check_box: %i[on_change].freeze,
+        area: %i[on_draw on_click on_mouse_down on_mouse_up on_mouse_move on_key on_wheel].freeze
       }.freeze
 
       # 适配层的指针事件 → 应用声明的处理器（设计 2.1/2.3）
@@ -240,6 +244,12 @@ module Citrine
             write_back_value(node)
             dispatch_event(node, :on_change, @widgets.get_value(node.dom))
           end
+          if node.props[:on_enter]
+            @widgets.on_enter(node.dom) do
+              write_back_value(node)
+              dispatch_event(node, :on_enter, @widgets.get_value(node.dom))
+            end
+          end
         when :check_box
           @widgets.on_change(node.dom) do
             checked = @widgets.checked?(node.dom)
@@ -257,13 +267,18 @@ module Citrine
         @widgets.on_area_draw(node.dom) do |painter|
           paint_area_style(node, painter)
           handler = node.props[:on_draw]
-          node.owner.handle_event(handler, painter) if handler
+          EventGuard.guard("#{describe_node(node)} 的 on_draw") do
+            node.owner.handle_event(handler, painter)
+          end if handler
           # 绘制期的提醒（颜色写错、align 缺 width…）按 dev_mode 去重输出：画一次说一次
           report_painter_warnings(painter)
           warn_starved_area(node, painter) if Citrine.dev_mode?
         end
         @widgets.on_area_pointer(node.dom) { |event| dispatch_pointer(node, event) }
         @widgets.on_area_key(node.dom) { |event| dispatch_area_key(node, event) }
+        if node.props[:on_wheel]
+          @widgets.on_area_wheel(node.dom) { |event| dispatch_wheel(node, event) }
+        end
       end
 
       # ── 面板的视觉底板（L2：样式的 :painted 组里 area 自动消费的那几个键）──────
@@ -376,7 +391,19 @@ module Citrine
         handler = node.props[prop]
         return unless handler
 
-        node.owner.handle_event(handler, event)
+        EventGuard.guard("#{describe_node(node)} 的 #{prop}") do
+          node.owner.handle_event(handler, event)
+        end
+      end
+
+      # 滚轮（载荷与 beryl L1 的 on_wheel 同口径；不抑制平台默认滚动）
+      def dispatch_wheel(node, event)
+        handler = node.props[:on_wheel]
+        return unless handler
+
+        EventGuard.guard("#{describe_node(node)} 的 on_wheel") do
+          node.owner.handle_event(handler, event)
+        end
       end
 
       # 键盘（设计 2.3）：键名已由适配层归一成 DOM 风格（"ArrowUp"/"Enter"/"a"…），
@@ -399,7 +426,9 @@ module Citrine
         handler = node.props[:on_key]
         handled = false
         if handler
-          node.owner.handle_key(handler, key_event)
+          EventGuard.guard("#{describe_node(node)} 的 on_key") do
+            node.owner.handle_key(handler, key_event)
+          end
           handled = true
         end
         handled = forward_window_key(node, key_event) || handled
@@ -419,7 +448,9 @@ module Citrine
             scoped = handler.is_a?(Component::WindowKey)
             next if scoped && !focused_in?(component, node)
 
-            component.handle_key(scoped ? handler.handler : handler, key_event)
+            EventGuard.guard("window_key 转发") do
+              component.handle_key(scoped ? handler.handler : handler, key_event)
+            end
             handled = true
           end
         end
@@ -685,13 +716,22 @@ module Citrine
         signal.set(checked) if signal.is_a?(Signal)
       end
 
+      # 事件报错上下文里的节点描述（核心只见节点树，不依赖控件层）
+      def describe_node(node)
+        kind = ELEMENTS.fetch(node.type, node.type).to_s
+        key = node.props[:key]
+        key ? "#{kind}(key: #{key.inspect})" : kind
+      end
+
       # 事件视图是平台无关的：button 收 Citrine::Event，check_box 收布尔勾选态
       # （与 DOM 侧同口径），text_input 收新文本（原生侧专属，见 GOALS 第五节的差异清单）
       def dispatch_event(node, prop, payload)
         handler = node.props[prop]
         return unless handler
 
-        node.owner.handle_event(handler, payload)
+        EventGuard.guard("#{describe_node(node)} 的 #{prop}") do
+          node.owner.handle_event(handler, payload)
+        end
       end
 
       # 覆盖基类钩子：本后端消费掉的 prop（area 的 size/scroll/watch）不算透传属性，
